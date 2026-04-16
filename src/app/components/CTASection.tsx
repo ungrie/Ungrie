@@ -1,48 +1,29 @@
-import { ArrowRight, Sparkles } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Calendar } from 'lucide-react';
 
 export function CTASection() {
   return (
-    <section className="py-16 md:py-20 px-6 lg:px-8 bg-stone-50">
-      <div className="max-w-4xl mx-auto">
-        <motion.div 
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-100px" }}
-          transition={{ duration: 0.7, ease: "easeOut" }}
-          className="bg-white border border-stone-200 rounded-[2.5rem] p-10 md:p-16 text-center relative overflow-hidden shadow-xl shadow-stone-200/50"
-        >
-          {/* Background Glows for warmth */}
-          <div className="absolute -top-24 -right-24 w-64 h-64 bg-amber-100/60 blur-[60px] rounded-full pointer-events-none" />
-          <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-primary/10 blur-[60px] rounded-full pointer-events-none" />
-          
-          <div className="relative z-10">
-            {/* Little Amber Accent Icon */}
-            <div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-sm">
-              <Sparkles className="w-7 h-7 text-amber-500" />
-            </div>
+    <section className="py-20 md:py-28 px-6 lg:px-8 bg-stone-900 relative overflow-hidden">
+      {/* Background ambient glow matching your theme */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl h-full bg-orange-600/20 blur-[120px] rounded-full pointer-events-none" />
 
-            <h2 className="text-4xl md:text-5xl font-extrabold text-stone-900 mb-6 tracking-tight">
-              Start getting direct orders today
-            </h2>
-            <p className="text-lg md:text-xl text-stone-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-              Join hundreds of restaurants already using Ungrie to take control of their online ordering, bypass the apps, and grow their margins.
-            </p>
-            
-            <motion.button 
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="px-8 py-4 bg-primary text-white rounded-xl font-bold transition-all shadow-lg shadow-[#25D366]/20 inline-flex items-center gap-2"
-            >
-              Request Access Now
-              <ArrowRight className="w-5 h-5" />
-            </motion.button>
-            
-            <p className="text-sm text-stone-400 mt-6 font-medium">
-              Takes 5 minutes to set up • No credit card required
-            </p>
-          </div>
-        </motion.div>
+      <div className="max-w-4xl mx-auto text-center relative z-10">
+        <h2 className="text-3xl md:text-5xl font-extrabold text-white mb-6 tracking-tight">
+          Ready to take control of your orders?
+        </h2>
+        <p className="text-lg md:text-xl text-stone-400 mb-10 max-w-2xl mx-auto">
+          Join hundreds of restaurants saving thousands on commissions every month. We'll set everything up for you.
+        </p>
+
+        {/* The Calendly Link Button */}
+        <a
+          href="https://calendly.com/ungrie-com/30min"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-500 transition-all hover:-translate-y-1 hover:shadow-lg hover:shadow-orange-600/30 active:scale-95 text-lg"
+        >
+          <Calendar className="w-5 h-5" />
+          Request Access
+        </a>
       </div>
     </section>
   );

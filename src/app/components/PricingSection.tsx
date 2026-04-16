@@ -152,16 +152,18 @@ export function PricingSection() {
                   </li>
                 ))}
               </ul>
-
-              <button
-                className={`w-full py-4 rounded-xl font-bold transition-all active:scale-[0.98] ${
+              <a
+                href="https://calendly.com/ungrie-com/30min"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`w-full py-4 rounded-xl font-bold transition-all active:scale-[0.98] text-center flex items-center justify-center ${
                   plan.highlighted
                     ? 'bg-orange-600 text-white hover:bg-orange-700 hover:shadow-lg hover:shadow-orange-600/30'
                     : 'bg-stone-50 text-stone-900 hover:bg-stone-100 border border-stone-200'
                 }`}
               >
                 Request Access
-              </button>
+              </a>
             </motion.div>
           ))}
         </motion.div>
