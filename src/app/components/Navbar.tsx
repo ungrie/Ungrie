@@ -1,4 +1,4 @@
-import { MessageSquare, Menu, X } from 'lucide-react';
+import { MessageSquare, Menu, X, LogIn } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -6,7 +6,6 @@ export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
 
-  // Add a scroll listener to change the navbar styling when the user scrolls down
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20);
@@ -22,102 +21,80 @@ export function Navbar() {
   ];
 
   return (
-    <motion.nav 
-      initial={{ y: -100 }}
-      animate={{ y: 0 }}
-      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled 
-          ? 'bg-white/85 backdrop-blur-xl border-b border-gray-200 shadow-sm py-2' 
-          : 'bg-transparent py-4'
+    <nav 
+      className={`fixed w-full z-50 transition-all duration-300 ${
+        isScrolled ? 'bg-white/80 backdrop-blur-md py-3 shadow-sm' : 'bg-transparent py-5'
       }`}
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14">
-          
+        <div className="flex items-center justify-between">
           {/* Logo */}
-          <motion.a 
-            href="#" 
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="flex items-center gap-2.5"
-          >
-            <div className="w-9 h-9 bg-gradient-to-br from-[#25D366] to-[#1da851] rounded-xl flex items-center justify-center shadow-md shadow-[#25D366]/20">
-              <MessageSquare className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-2 group cursor-pointer">
+            <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center transition-transform group-hover:rotate-12">
+              <MessageSquare className="text-white w-6 h-6" />
             </div>
-            <span className="text-xl font-extrabold tracking-tight text-gray-900">Ungrie</span>
-          </motion.a>
+            <span className="text-2xl font-black text-stone-900 tracking-tighter">
+              UNGRIE
+            </span>
+          </div>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
               <a 
-                key={link.name}
+                key={link.name} 
                 href={link.href} 
-                className="relative text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors group py-2"
+                className="text-sm font-bold text-stone-600 hover:text-orange-600 transition-colors"
               >
                 {link.name}
-                {/* Animated underline effect on hover */}
-                <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full rounded-full"></span>
               </a>
             ))}
+            
+            {/* Swapped Trial Button for Login */}
+            <button className="flex items-center gap-2 px-5 py-2.5 bg-stone-900 text-white rounded-xl font-bold text-sm hover:bg-stone-800 transition-all active:scale-95">
+              <LogIn className="w-4 h-4" />
+              Login
+            </button>
           </div>
 
-          {/* CTA Buttons & Mobile Toggle */}
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-3">
-              <button className="px-4 py-2 text-sm font-semibold text-gray-700 hover:text-gray-900 transition-colors">
-                Login
-              </button>
-              <button className="px-5 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-orange-700 transition-all hover:shadow-lg hover:shadow-[#25D366]/30 active:scale-95">
-                Start Free Trial
-              </button>
-            </div>
-            
-            {/* Mobile Menu Button */}
-            <motion.button
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 text-gray-900 bg-gray-100/50 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </motion.button>
-          </div>
+          {/* Mobile Menu Toggle */}
+          <button 
+            className="md:hidden p-2 text-stone-900"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          >
+            {mobileMenuOpen ? <X /> : <Menu />}
+          </button>
         </div>
       </div>
 
-      {/* Mobile Menu Dropdown with AnimatePresence */}
+      {/* Mobile Menu */}
       <AnimatePresence>
         {mobileMenuOpen && (
           <motion.div 
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="md:hidden overflow-hidden bg-white/95 backdrop-blur-xl border-b border-gray-200 shadow-xl"
+            className="md:hidden bg-white border-t border-stone-100 overflow-hidden"
           >
-            <div className="px-6 py-6 flex flex-col gap-5">
+            <div className="px-6 py-8 space-y-6">
               {navLinks.map((link) => (
-                <a
-                  key={link.name}
-                  href={link.href}
-                  className="text-base font-semibold text-gray-700 hover:text-orange-600 transition-colors"
+                <a 
+                  key={link.name} 
+                  href={link.href} 
                   onClick={() => setMobileMenuOpen(false)}
+                  className="block text-lg font-bold text-stone-900"
                 >
                   {link.name}
                 </a>
               ))}
-              <div className="h-px bg-gray-100 my-2 w-full"></div>
-              <button className="w-full py-3 text-gray-700 font-semibold bg-gray-50 rounded-xl border border-gray-200">
+              <button className="w-full flex items-center justify-center gap-2 py-4 bg-stone-900 text-white rounded-xl font-bold">
+                <LogIn className="w-5 h-5" />
                 Login
-              </button>
-              <button className="w-full py-3 bg-primary text-white rounded-xl font-bold shadow-md shadow-[#25D366]/20 active:scale-95 transition-all">
-                Start Free Trial
               </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.nav>
+    </nav>
   );
 }

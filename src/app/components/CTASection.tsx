@@ -34,7 +34,7 @@ export function CTASection() {
               whileTap={{ scale: 0.95 }}
               className="px-8 py-4 bg-primary text-white rounded-xl font-bold transition-all shadow-lg shadow-[#25D366]/20 inline-flex items-center gap-2"
             >
-              Start your 14-day free trial
+              Request Access Now
               <ArrowRight className="w-5 h-5" />
             </motion.button>
             
