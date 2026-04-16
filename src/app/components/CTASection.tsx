@@ -22,7 +22,7 @@ export function CTASection() {
           className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-500 transition-all hover:-translate-y-1 hover:shadow-lg hover:shadow-orange-600/30 active:scale-95 text-lg"
         >
           <Calendar className="w-5 h-5" />
-          Request Access
+          Book a Demo
         </a>
       </div>
     </section>

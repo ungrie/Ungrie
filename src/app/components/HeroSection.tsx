@@ -38,7 +38,7 @@ export function HeroSection() {
               Accepting New Restaurants
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-extrabold text-stone-900 leading-[1.1] tracking-tight">
-              Turn WhatsApp into your <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-red-600">ordering system</span>
+              Turn WhatsApp into your <span className="whitespace-nowrap"><span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-red-600">ordering system</span></span>
             </h1>
             <p className="text-lg md:text-xl text-stone-600 leading-relaxed max-w-2xl mx-auto lg:mx-0">
               No commissions. No apps. Just direct orders from the app your customers already use.
@@ -77,7 +77,8 @@ export function HeroSection() {
           initial={{ opacity: 0, x: 50 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
-          className="hidden lg:block absolute right-0 top-1/2 -translate-y-1/2 translate-x-4 xl:-translate-x-8 z-0 pointer-events-none"
+          // THE FIX: Changed translate to pull inward, and added scale-90 for iPads!
+          className="hidden lg:block absolute right-0 top-1/2 -translate-y-1/2 -translate-x-4 scale-[0.85] xl:scale-100 xl:-translate-x-8 z-0 pointer-events-none origin-right"
         >
           <motion.div
             animate={{ y: [0, -10, 0] }}

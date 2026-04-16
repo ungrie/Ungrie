@@ -1,6 +1,8 @@
+import { useNavigate } from 'react-router-dom';
 import { MessageSquare, Twitter, Linkedin, Instagram, Facebook } from 'lucide-react';
 
 export function Footer() {
+  const navigate = useNavigate();
   return (
     <footer className="border-t border-stone-200 py-12 px-6 lg:px-8 bg-stone-50">
       <div className="max-w-7xl mx-auto">
@@ -41,9 +43,11 @@ export function Footer() {
               </li>
               <li>
                 {/* Added Login Link Here */}
-                <a href="https://tasty-flbj1a845-daredevildd7s-projects.vercel.app/" className="text-stone-500 hover:text-orange-600 text-sm transition-colors font-medium">
+                <button
+                  onClick={() => navigate('/login')}
+                  className="text-stone-500 hover:text-orange-600 text-sm transition-colors font-medium">
                   Login
-                </a>
+                </button>
               </li>
             </ul>
           </div>
