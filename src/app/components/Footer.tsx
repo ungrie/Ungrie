@@ -58,17 +58,17 @@ export function Footer() {
                 </a>
               </li>
               <li>
-                <a href="/privacy" className="text-stone-500 hover:text-orange-600 text-sm transition-colors">
+                <a href="#privacy" className="text-stone-500 hover:text-orange-600 text-sm transition-colors">
                   Privacy Policy
                 </a>
               </li>
               <li>
-                <a href="/terms" className="text-stone-500 hover:text-orange-600 text-sm transition-colors">
+                <a href="#terms" className="text-stone-500 hover:text-orange-600 text-sm transition-colors">
                   Terms of Service
                 </a>
               </li>
               <li>
-                <a href="/cookies" className="text-stone-500 hover:text-orange-600 text-sm transition-colors">
+                <a href="#cookies" className="text-stone-500 hover:text-orange-600 text-sm transition-colors">
                   Cookie Policy
                 </a>
               </li>
