@@ -4784,7 +4784,7 @@ function MenuPage({ t, user }) {
       let imagePath = editingItem?.image_path || "/foodlogo.jpg";
 
       if (itemForm.imageFile) {
-        const bucketName = "Ungrie-menu";
+        const bucketName = "feastrush-menu";
         const ext = itemForm.imageFile.name.split(".").pop().toLowerCase();
         const filePath = `${restId}/menu/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
@@ -5347,7 +5347,7 @@ function MenuPage({ t, user }) {
       let imagePath = editingAddon?.image_path || null;
 
       if (addonForm.imageFile) {
-        const bucketName = "Ungrie-menu";
+        const bucketName = "feastrush-menu";
         const ext = addonForm.imageFile.name.split(".").pop().toLowerCase();
         const folderPath = `${restId}/add_ons`;
         const filePath = `${folderPath}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
