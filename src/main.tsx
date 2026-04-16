@@ -3,7 +3,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import Login from "./Login.jsx";
 import LandingApp from "./app/App.tsx";
-import Dashboard from "./Dashboard.jsx"; 
+import Dashboard from "./Dashboard.jsx";
+import Customer from "./Customer.jsx";
 import { supabase } from "./supabaseClient";
 import "./styles/index.css";
 import "./index.css";
@@ -44,6 +45,7 @@ function AppRoutes() {
       {/* 3. Pass the loggedInUser down into the Dashboard! */}
       {/* Note: Change 'user' to whatever prop name your Dashboard expects */}
       <Route path="/dashboard" element={<Dashboard user={loggedInUser} onLogout={handleLogout} />} />
+      <Route path="/customer" element={<Customer />} />
     </Routes>
   );
 }
