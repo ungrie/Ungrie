@@ -32,7 +32,7 @@ export function ProductDemoSection() {
   };
 
   return (
-    <section className="py-16 md:py-24 px-6 lg:px-8 bg-gray-50 overflow-hidden">
+    <section className="py-16 md:py-16 md:py-20 px-6 lg:px-8 bg-gray-50 overflow-hidden">
       <div className="max-w-7xl mx-auto">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           
