@@ -28,7 +28,7 @@ export function TestimonialsSection() {
   };
 
   return (
-    <section className="py-16 md:py-24 px-6 lg:px-8 bg-stone-100 border-y border-stone-200">
+    <section id="testimonials" className="py-16 md:py-24 px-6 lg:px-8 bg-stone-100 border-y border-stone-200">
       <div className="max-w-7xl mx-auto">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}

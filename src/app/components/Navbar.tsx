@@ -51,10 +51,13 @@ export function Navbar() {
             ))}
             
             {/* Swapped Trial Button for Login */}
-            <button className="flex items-center gap-2 px-5 py-2.5 bg-stone-900 text-white rounded-xl font-bold text-sm hover:bg-stone-800 transition-all active:scale-95">
+            <a 
+              href="https://ungrie.com/login" 
+              className="flex items-center gap-2 px-5 py-2.5 bg-stone-900 text-white rounded-xl font-bold text-sm hover:bg-stone-800 transition-all active:scale-95"
+            >
               <LogIn className="w-4 h-4" />
               Login
-            </button>
+            </a>
           </div>
 
           {/* Mobile Menu Toggle */}
@@ -87,10 +90,13 @@ export function Navbar() {
                   {link.name}
                 </a>
               ))}
-              <button className="w-full flex items-center justify-center gap-2 py-4 bg-stone-900 text-white rounded-xl font-bold">
+              <a 
+                href="https://ungrie.com/login" 
+                className="w-full flex items-center justify-center gap-2 py-4 bg-stone-900 text-white rounded-xl font-bold"
+              >
                 <LogIn className="w-5 h-5" />
                 Login
-              </button>
+              </a>
             </div>
           </motion.div>
         )}
