@@ -2,10 +2,12 @@ import { ArrowLeft, Video, Phone, MoreVertical, Plus, Camera, Mic, CheckCheck } 
 
 export function WhatsAppMockup() {
   return (
-    <div className="relative w-full max-w-[340px] mx-auto">
+    // ADDED text-left HERE: This forces all chat text to stay strictly left-aligned
+    <div className="relative w-full max-w-[340px] mx-auto text-left">
+      
       {/* Phone Frame */}
       <div className="bg-gray-900 rounded-[3rem] p-2.5 border-4 border-gray-800 shadow-2xl relative">
-        {/* Notch (Optional, for modern phone feel) */}
+        {/* Notch */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-gray-900 rounded-b-2xl z-20"></div>
 
         {/* Screen */}
@@ -30,8 +32,17 @@ export function WhatsAppMockup() {
             </div>
           </div>
 
-          {/* Chat Messages Area */}
-          <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
+          {/* Chat Messages Area with DOODLE BACKGROUND */}
+          <div 
+            className="flex-1 overflow-y-auto px-3 py-4 space-y-3 relative"
+            style={{
+              backgroundImage: `url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")`,
+              backgroundRepeat: 'repeat',
+              backgroundSize: '400px',
+              backgroundBlendMode: 'multiply',
+              opacity: 0.95
+            }}
+          >
             {/* Date Badge */}
             <div className="flex justify-center mb-4">
               <span className="bg-[#d4eaf4] text-gray-600 text-[11px] px-3 py-1 rounded-lg shadow-sm">
@@ -80,20 +91,23 @@ export function WhatsAppMockup() {
             <div className="flex justify-start">
               <div className="bg-white text-gray-900 px-3 py-1.5 rounded-lg rounded-tl-none max-w-[85%] shadow-sm relative">
                 <div className="pb-4 pt-0.5">
-                  <p className="text-[15px] font-semibold mb-1">Order Summary:</p>
-                  <div className="space-y-1 text-[14px]">
-                    <div className="flex justify-between gap-4">
-                      <span>1x Margherita Pizza (L)</span>
-                      <span>$18.00</span>
+                  <p className="text-[15px] font-bold mb-2">Order Summary:</p>
+                  <div className="space-y-1.5 text-[14px]">
+                    
+                    <div className="flex justify-between gap-3 items-start">
+                      <span className="leading-tight text-gray-800">1x Margherita Pizza (L)</span>
+                      <span className="whitespace-nowrap font-medium text-gray-700">4.50 KWD</span>
                     </div>
-                    <div className="flex justify-between gap-4">
-                      <span>1x Caesar Salad</span>
-                      <span>$12.00</span>
+                    
+                    <div className="flex justify-between gap-3 items-start">
+                      <span className="leading-tight text-gray-800">1x Caesar Salad</span>
+                      <span className="whitespace-nowrap font-medium text-gray-700">2.50 KWD</span>
                     </div>
-                    <div className="border-t border-gray-200 my-1.5 pt-1.5">
-                      <div className="flex justify-between gap-4 font-bold text-gray-900">
+                    
+                    <div className="border-t border-gray-200 my-2 pt-1.5">
+                      <div className="flex justify-between gap-3 font-extrabold text-gray-900 text-[15px]">
                         <span>Total</span>
-                        <span>$30.00</span>
+                        <span className="whitespace-nowrap">7.00 KWD</span>
                       </div>
                     </div>
                   </div>
@@ -130,12 +144,11 @@ export function WhatsAppMockup() {
               </div>
             </div>
             
-            {/* Spacer for scrolling past the footer */}
             <div className="h-2"></div>
           </div>
 
           {/* Authentic WhatsApp Input Footer */}
-          <div className="bg-transparent p-2 flex items-end gap-2 pb-5 z-10">
+          <div className="bg-[#f0f2f5] p-2 flex items-end gap-2 z-10">
             <div className="flex-1 bg-white rounded-full flex items-center px-2 py-1.5 shadow-sm border border-gray-200 min-h-[40px]">
               <Plus className="w-6 h-6 text-gray-500 mx-1 cursor-pointer" />
               <div className="flex-1 px-2 text-[15px] text-gray-400">Message</div>
@@ -149,8 +162,8 @@ export function WhatsAppMockup() {
         </div>
       </div>
 
-      {/* Floating Glow Effect (behind the phone) */}
-      <div className="absolute -inset-6 bg-gradient-to-r from-amber-400/20 to-[#25D366]/20 blur-2xl -z-10 rounded-[4rem] pointer-events-none" />
+      {/* Floating Glow Effect */}
+      <div className="absolute -inset-6 bg-gradient-to-r from-orange-400/20 to-red-500/20 blur-2xl -z-10 rounded-[4rem] pointer-events-none" />
     </div>
   );
 }

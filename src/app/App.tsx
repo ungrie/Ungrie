@@ -11,6 +11,7 @@ import { PricingSection } from './components/PricingSection';
 import { CTASection } from './components/CTASection';
 import { FAQSection } from './components/FAQSection';
 import { Footer } from './components/Footer';
+import { BackToTop } from './components/BackToTop';
 
 // Import your new Legal Pages
 import { PrivacyPolicy } from './components/PrivacyPolicy';
@@ -56,6 +57,8 @@ export default function App() {
       <CTASection />
       <FAQSection />
       <Footer />
+      <BackToTop />
+
     </div>
   );
 }

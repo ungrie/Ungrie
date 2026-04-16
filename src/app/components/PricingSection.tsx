@@ -3,7 +3,6 @@ import { Check, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export function PricingSection() {
-  // State to track if the user has selected Annual billing
   const [isAnnual, setIsAnnual] = useState(false);
 
   const plans = [
@@ -40,7 +39,7 @@ export function PricingSection() {
 
   const cardVariants = {
     hidden: { opacity: 0, y: 40 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.6, easeOut: true } }
+    visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] } }
   };
 
   return (
@@ -60,7 +59,6 @@ export function PricingSection() {
             No hidden fees. No commission on orders. Just one flat monthly rate.
           </p>
 
-          {/* The Animated Toggle */}
           <div className="flex items-center justify-center gap-4">
             <span className={`text-sm font-bold transition-colors ${!isAnnual ? 'text-stone-900' : 'text-stone-400'}`}>
               Monthly
@@ -116,25 +114,26 @@ export function PricingSection() {
                 <p className="text-stone-500 text-sm h-10 font-medium">{plan.description}</p>
               </div>
 
-              {/* Dynamic Price Display */}
+              {/* UPDATED: Changed $ to KWD and moved it to the right for better reading */}
               <div className="mb-6 flex flex-col">
-                <div className="flex items-baseline overflow-hidden">
+                <div className="flex items-baseline overflow-hidden gap-1">
                   <motion.span 
                     key={isAnnual ? 'annual' : 'monthly'}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="text-5xl font-extrabold text-stone-900 tracking-tight"
                   >
-                    ${isAnnual ? plan.annualPrice : plan.monthlyPrice}
+                    {isAnnual ? plan.annualPrice : plan.monthlyPrice}
                   </motion.span>
+                  <span className="text-2xl font-bold text-stone-900">KWD</span>
                   <span className="text-stone-500 font-medium ml-1">/mo</span>
                 </div>
                 
-                {/* Subtle "Billed yearly" hint that only shows on Annual */}
+                {/* UPDATED: Changed $ to KWD here as well */}
                 <div className="h-6 mt-1 transition-opacity duration-300">
                   {isAnnual ? (
                     <span className="text-sm font-bold text-green-600 bg-green-50 px-2.5 py-1 rounded-md">
-                      Billed ${plan.annualPrice * 12} yearly
+                      Billed {plan.annualPrice * 12} KWD yearly
                     </span>
                   ) : (
                     <span className="text-sm text-transparent select-none">Placeholder</span>
@@ -152,8 +151,9 @@ export function PricingSection() {
                   </li>
                 ))}
               </ul>
+
               <a
-                href="https://calendly.com/ungrie-com/30min"
+                href="https://calendly.com/YOUR-USERNAME/15min"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`w-full py-4 rounded-xl font-bold transition-all active:scale-[0.98] text-center flex items-center justify-center ${
