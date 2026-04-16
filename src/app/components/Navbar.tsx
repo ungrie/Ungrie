@@ -52,7 +52,7 @@ export function Navbar() {
             
             {/* Swapped Trial Button for Login */}
             <a 
-              href="https://ungrie.com/login" 
+              href="https://tasty-flbj1a845-daredevildd7s-projects.vercel.app/" 
               className="flex items-center gap-2 px-5 py-2.5 bg-stone-900 text-white rounded-xl font-bold text-sm hover:bg-stone-800 transition-all active:scale-95"
             >
               <LogIn className="w-4 h-4" />

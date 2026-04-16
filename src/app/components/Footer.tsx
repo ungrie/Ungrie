@@ -41,7 +41,7 @@ export function Footer() {
               </li>
               <li>
                 {/* Added Login Link Here */}
-                <a href="https://ungrie.com/login" className="text-stone-500 hover:text-orange-600 text-sm transition-colors font-medium">
+                <a href="https://tasty-flbj1a845-daredevildd7s-projects.vercel.app/" className="text-stone-500 hover:text-orange-600 text-sm transition-colors font-medium">
                   Login
                 </a>
               </li>
