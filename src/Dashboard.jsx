@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import './index.css';
 
 // ─── Theme tokens ─────────────────────────────────────────────────────────────
 const LIGHT = {
