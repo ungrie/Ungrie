@@ -2382,15 +2382,290 @@ function DeliveryPage({ t, user }) {
   );
 }
 
+// ─── Customer Flip Card ───────────────────────────────────────────────────────
+function CustomerFlipCard({ customer, onClose, t }) {
+  const [flipped, setFlipped] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    // Trigger flip to back after mount
+    const timer = setTimeout(() => setFlipped(true), 80);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleClose = () => {
+    setFlipped(false);
+    setClosing(true);
+    setTimeout(onClose, 400);
+  };
+
+  const c = customer;
+  const initials = (c.name || "?")
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || "")
+    .join("");
+
+  const avatarColors = [
+    ["#C4711A", "#f5e6d3"],
+    ["#2D7A4F", "#d4eddf"],
+    ["#6366F1", "#e0e7ff"],
+    ["#EC4899", "#fce7f3"],
+    ["#14B8A6", "#ccfbf1"],
+  ];
+  const [accentColor, bgColor] =
+    avatarColors[Math.abs((c.name || "").charCodeAt(0) || 0) % avatarColors.length];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 70,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: closing ? "rgba(0,0,0,0)" : "rgba(0,0,0,0.5)",
+        backdropFilter: closing ? "blur(0px)" : "blur(6px)",
+        transition: "background 0.4s, backdrop-filter 0.4s",
+        padding: "16px",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleClose();
+      }}
+    >
+      <style>{`
+        .cust-flip-scene {
+          width: 340px;
+          max-width: 100%;
+          height: 420px;
+          perspective: 1200px;
+        }
+        @media (max-width: 400px) {
+          .cust-flip-scene { height: 460px; }
+        }
+        .cust-flip-card {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          transform-style: preserve-3d;
+          transition: transform 0.55s cubic-bezier(0.4, 0.2, 0.2, 1);
+        }
+        .cust-flip-card.flipped {
+          transform: rotateY(180deg);
+        }
+        .cust-flip-front,
+        .cust-flip-back {
+          position: absolute;
+          inset: 0;
+          border-radius: 20px;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+          overflow: hidden;
+          box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+        }
+        .cust-flip-back {
+          transform: rotateY(180deg);
+        }
+        @keyframes custSlideUp {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .cust-stat-row {
+          animation: custSlideUp 0.35s ease forwards;
+        }
+        .cust-stat-row:nth-child(1) { animation-delay: 0.1s; opacity: 0; }
+        .cust-stat-row:nth-child(2) { animation-delay: 0.18s; opacity: 0; }
+        .cust-stat-row:nth-child(3) { animation-delay: 0.26s; opacity: 0; }
+        .cust-stat-row:nth-child(4) { animation-delay: 0.34s; opacity: 0; }
+        .cust-stat-row:nth-child(5) { animation-delay: 0.42s; opacity: 0; }
+      `}</style>
+
+      <div className="cust-flip-scene">
+        <div className={`cust-flip-card ${flipped ? "flipped" : ""}`}>
+          {/* FRONT — decorative placeholder shown briefly */}
+          <div
+            className="cust-flip-front"
+            style={{ background: bgColor, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}
+          >
+            <div
+              style={{
+                width: 80, height: 80, borderRadius: "50%",
+                background: accentColor,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 32, fontWeight: 800, color: "#fff",
+                fontFamily: "'Cormorant Garamond', serif",
+                boxShadow: `0 8px 24px ${accentColor}55`,
+              }}
+            >
+              {initials || "?"}
+            </div>
+            <p style={{ color: accentColor, fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 700 }}>
+              {c.name}
+            </p>
+          </div>
+
+          {/* BACK — full profile */}
+          <div
+            className="cust-flip-back"
+            style={{ background: t.surface, border: `1px solid ${t.border}`, display: "flex", flexDirection: "column" }}
+          >
+            {/* Header strip */}
+            <div
+              style={{
+                background: accentColor,
+                padding: "24px 24px 20px",
+                position: "relative",
+              }}
+            >
+              <button
+                onClick={handleClose}
+                style={{
+                  position: "absolute", top: 14, right: 14,
+                  background: "rgba(255,255,255,0.25)",
+                  border: "none", borderRadius: "50%",
+                  width: 28, height: 28,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700,
+                }}
+              >
+                ✕
+              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div
+                  style={{
+                    width: 56, height: 56, borderRadius: "50%",
+                    background: "rgba(255,255,255,0.25)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 22, fontWeight: 800, color: "#fff",
+                    fontFamily: "'Cormorant Garamond', serif",
+                    border: "2px solid rgba(255,255,255,0.4)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {initials || "?"}
+                </div>
+                <div>
+                  <p style={{ color: "#fff", fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 800, lineHeight: 1.2 }}>
+                    {c.name}
+                  </p>
+                  <p style={{ color: "rgba(255,255,255,0.75)", fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 2 }}>
+                    {c.phone !== "—" ? c.phone : "No phone on file"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+              {[
+                {
+                  icon: "🛒",
+                  label: "Total Orders",
+                  value: String(c.orders),
+                  color: t.accent,
+                },
+                {
+                  icon: "💰",
+                  label: "Bill Total",
+                  value: `KD ${Number(c.revenue || 0).toFixed(3)}`,
+                  color: t.green,
+                },
+                {
+                  icon: "📊",
+                  label: "Avg Order Value",
+                  value: `KD ${Number(c.avg || 0).toFixed(3)}`,
+                  color: t.text,
+                },
+                {
+                  icon: "📅",
+                  label: "Joined On",
+                  value: c.joined
+                    ? new Date(c.joined).toLocaleDateString("en-KW", { day: "numeric", month: "long", year: "numeric" })
+                    : "—",
+                  color: t.text,
+                },
+                {
+                  icon: "📡",
+                  label: "Broadcast",
+                  value: c.broadcast === true ? "Yes" : c.broadcast === false ? "No" : "—",
+                  color: c.broadcast ? t.green : t.muted,
+                  badge: true,
+                  badgeYes: c.broadcast === true,
+                },
+              ].map((row, idx) => (
+                <div
+                  key={idx}
+                  className="cust-stat-row"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "11px 0",
+                    borderBottom: idx < 4 ? `1px solid ${t.border}` : "none",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 16 }}>{row.icon}</span>
+                    <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                      {row.label}
+                    </span>
+                  </div>
+                  {row.badge ? (
+                    <span
+                      style={{
+                        background: row.badgeYes ? t.greenBg : t.surface2,
+                        border: `1px solid ${row.badgeYes ? t.greenBorder : t.border2}`,
+                        color: row.badgeYes ? t.green : t.muted,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 11, fontWeight: 700,
+                        padding: "3px 10px", borderRadius: 999,
+                      }}
+                    >
+                      {row.value}
+                    </span>
+                  ) : (
+                    <span style={{ color: row.color, fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 800 }}>
+                      {row.value}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Last order footer */}
+            {c.lastOrder && (
+              <div
+                style={{
+                  padding: "12px 24px",
+                  borderTop: `1px solid ${t.border}`,
+                  background: t.surface2,
+                  borderRadius: "0 0 20px 20px",
+                }}
+              >
+                <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, textAlign: "center" }}>
+                  Last order: {new Date(c.lastOrder).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric" })}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Customers Page ───────────────────────────────────────────────────────────
 function CustomersPage({ t, user }) {
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  const [topN, setTopN] = useState(15);
-  const [topNInput, setTopNInput] = useState("15");
-  const [sortBy, setSortBy] = useState("revenue"); // revenue | orders | avg
+  const [topN, setTopN] = useState(50);
+  const [topNInput, setTopNInput] = useState("50");
+  const [sortBy, setSortBy] = useState("revenue"); // revenue | orders | joined
+  const [sortDir, setSortDir] = useState("desc"); // asc | desc
+  const [search, setSearch] = useState("");
+  const [filterMode, setFilterMode] = useState("All Customers"); // All Customers | Top Customers
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
   const load = useCallback(async () => {
     if (!restId) {
@@ -2401,7 +2676,6 @@ function CustomersPage({ t, user }) {
     setLoading(true);
     setErr(null);
     try {
-      // Fetch all delivered/accepted orders for this restaurant
       const { data: orders, error: oErr } = await supabase
         .from("Orders")
         .select("id, cust_id, total_amount, status, created_at")
@@ -2409,23 +2683,14 @@ function CustomersPage({ t, user }) {
         .in("status", ["delivered", "accepted", "preparing", "on_the_way"]);
       if (oErr) throw oErr;
 
-      // Aggregate per customer
       const custMap = {};
       (orders || []).forEach((o) => {
         if (!custMap[o.cust_id])
-          custMap[o.cust_id] = {
-            cust_id: o.cust_id,
-            orders: 0,
-            revenue: 0,
-            lastOrder: null,
-          };
+          custMap[o.cust_id] = { cust_id: o.cust_id, orders: 0, revenue: 0, lastOrder: null };
         custMap[o.cust_id].orders++;
         custMap[o.cust_id].revenue += Number(o.total_amount || 0);
         const d = new Date(o.created_at);
-        if (
-          !custMap[o.cust_id].lastOrder ||
-          d > new Date(custMap[o.cust_id].lastOrder)
-        ) {
+        if (!custMap[o.cust_id].lastOrder || d > new Date(custMap[o.cust_id].lastOrder)) {
           custMap[o.cust_id].lastOrder = o.created_at;
         }
       });
@@ -2437,17 +2702,14 @@ function CustomersPage({ t, user }) {
         return;
       }
 
-      // Fetch customer profiles
       const { data: profiles, error: pErr } = await supabase
         .from("Customer")
-        .select("id, cust_name, ph_num, joined_on")
+        .select("id, cust_name, ph_num, joined_on, broadcast")
         .in("id", custIds);
       if (pErr) throw pErr;
 
       const profileMap = {};
-      (profiles || []).forEach((p) => {
-        profileMap[p.id] = p;
-      });
+      (profiles || []).forEach((p) => { profileMap[p.id] = p; });
 
       const list = custIds.map((cid) => {
         const agg = custMap[cid];
@@ -2457,6 +2719,7 @@ function CustomersPage({ t, user }) {
           name: prof.cust_name || "—",
           phone: prof.ph_num || "—",
           joined: prof.joined_on || null,
+          broadcast: prof.broadcast ?? null,
           avg: agg.orders > 0 ? agg.revenue / agg.orders : 0,
         };
       });
@@ -2470,331 +2733,383 @@ function CustomersPage({ t, user }) {
     }
   }, [restId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const sorted = [...customers]
-    .sort((a, b) => {
-      if (sortBy === "orders") return b.orders - a.orders;
-      if (sortBy === "avg") return b.avg - a.avg;
-      return b.revenue - a.revenue;
-    })
-    .slice(0, topN);
+  useEffect(() => { load(); }, [load]);
 
   const applyTopN = () => {
     const n = parseInt(topNInput, 10);
-    if (!isNaN(n) && n > 0 && n <= 1000) setTopN(n);
+    if (!isNaN(n) && n > 0 && n <= 10000) setTopN(n);
     else setTopNInput(String(topN));
   };
 
-  const medalColor = (i) =>
-    i === 0 ? "#F59E0B" : i === 1 ? "#9CA3AF" : i === 2 ? "#B45309" : t.muted;
-  const medalEmoji = (i) =>
-    i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortBy(col); setSortDir("desc"); }
+  };
 
-  const maxRevenue = sorted[0]?.revenue || 1;
+  const filtered = [...customers]
+    .filter((c) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        (c.name || "").toLowerCase().includes(q) ||
+        (c.phone || "").toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => {
+      let diff = 0;
+      if (sortBy === "orders") diff = b.orders - a.orders;
+      else if (sortBy === "joined") {
+        diff = (b.joined ? new Date(b.joined).getTime() : 0) - (a.joined ? new Date(a.joined).getTime() : 0);
+      } else {
+        diff = b.revenue - a.revenue;
+      }
+      return sortDir === "desc" ? diff : -diff;
+    })
+    .slice(0, filterMode === "Top Customers" ? Math.min(topN, 50) : topN);
+
+  const SortIcon = ({ col }) => {
+    if (sortBy !== col) return <span style={{ color: t.muted, opacity: 0.4, fontSize: 10 }}>⇅</span>;
+    return <span style={{ color: t.accent, fontSize: 10 }}>{sortDir === "desc" ? "↓" : "↑"}</span>;
+  };
+
+  const fmtJoined = (d) => {
+    if (!d) return "—";
+    const date = new Date(d);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffDays < 1) return "Today";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
+    return `${Math.floor(diffDays / 365)}y ago`;
+  };
+
+  const fmtJoinedFull = (d) => {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-KW", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  };
 
   return (
-    <div className="p-5 md:p-8 max-w-5xl space-y-6 overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <div style={{ padding: "24px 20px 40px", maxWidth: 1100, fontFamily: "'Lato', sans-serif" }}>
+      <style>{`
+        .cust-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 14px; }
+        .cust-table { width: 100%; border-collapse: collapse; min-width: 640px; }
+        .cust-table thead th {
+          padding: 12px 14px;
+          text-align: left;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.07em;
+          text-transform: uppercase;
+          white-space: nowrap;
+          cursor: pointer;
+          user-select: none;
+        }
+        .cust-table thead th:hover { opacity: 0.75; }
+        .cust-table tbody tr {
+          transition: background 0.15s;
+          cursor: default;
+        }
+        .cust-table tbody tr:hover { filter: brightness(0.97); }
+        .cust-table tbody td {
+          padding: 13px 14px;
+          font-size: 13px;
+          vertical-align: middle;
+          white-space: nowrap;
+        }
+        .cust-avatar {
+          width: 34px; height: 34px; border-radius: 50%;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-weight: 800; font-size: 13px;
+          font-family: 'Cormorant Garamond', serif;
+          flex-shrink: 0;
+        }
+        .cust-detail-btn {
+          width: 28px; height: 28px; border-radius: 50%;
+          border: none; cursor: pointer;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-size: 14px;
+          transition: transform 0.18s, opacity 0.18s;
+          background: none;
+        }
+        .cust-detail-btn:hover { transform: scale(1.2); opacity: 0.8; }
+        .cust-search-wrap { position: relative; }
+        .cust-search-wrap input { padding-left: 36px !important; }
+        .cust-search-icon {
+          position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+          font-size: 14px; pointer-events: none; opacity: 0.45;
+        }
+        @media (max-width: 500px) {
+          .cust-table tbody td { padding: 11px 10px; font-size: 12px; }
+          .cust-table thead th { padding: 10px 10px; font-size: 10px; }
+        }
+      `}</style>
+
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <div>
-          <h1
-            style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text }}
-            className="text-3xl md:text-4xl font-bold tracking-tight"
-          >
+          <h1 style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: "clamp(28px, 5vw, 38px)", fontWeight: 800, margin: 0, lineHeight: 1.1 }}>
             Customers
           </h1>
-          <p
-            style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
-            className="text-sm mt-0.5"
-          >
+          <p style={{ color: t.subtle, fontSize: 13, margin: "4px 0 0", fontFamily: "'Lato', sans-serif" }}>
             {loading
               ? "Loading…"
-              : `${customers.length} customer${customers.length !== 1 ? "s" : ""} · showing top ${Math.min(topN, customers.length)}`}
+              : `${customers.length} total · showing ${filtered.length}`}
           </p>
         </div>
         <button
           onClick={load}
           style={{
-            background: t.surface2,
-            border: `1px solid ${t.border2}`,
-            color: t.subtle,
-            fontFamily: "'Lato', sans-serif",
+            background: t.surface2, border: `1px solid ${t.border2}`,
+            color: t.subtle, fontFamily: "'Lato', sans-serif",
+            fontSize: 12, fontWeight: 700, padding: "8px 14px",
+            borderRadius: 10, cursor: "pointer",
           }}
-          className="text-xs font-semibold px-3 py-2 rounded-lg hover:opacity-70 transition-opacity"
         >
           Refresh ↺
         </button>
       </div>
 
       {err && (
-        <div
-          style={{
-            background: "#FEF2F2",
-            border: "1px solid #FECACA",
-            color: "#B83232",
-            fontFamily: "'Lato', sans-serif",
-          }}
-          className="rounded-xl px-4 py-3 text-sm"
-        >
+        <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#B83232", borderRadius: 10, padding: "10px 16px", fontSize: 13, marginBottom: 16 }}>
           ⚠️ {err}
         </div>
       )}
 
-      {/* Controls */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {/* Sort */}
-        <div
-          style={{ borderBottom: `1px solid ${t.border}` }}
-          className="flex gap-0"
-        >
-          {[
-            ["revenue", "By Revenue"],
-            ["orders", "By Orders"],
-            ["avg", "By Avg Order"],
-          ].map(([v, l]) => (
-            <button
-              key={v}
-              onClick={() => setSortBy(v)}
-              style={{
-                color: sortBy === v ? t.accent : t.subtle,
-                borderBottomColor: sortBy === v ? t.accent : "transparent",
-                fontFamily: "'Lato', sans-serif",
-              }}
-              className="pb-2 px-4 text-xs font-bold border-b-2 transition-colors whitespace-nowrap tracking-wider uppercase"
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-        {/* Top N control */}
-        <div className="flex items-center gap-2 ml-auto">
-          <span
-            style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
-            className="text-xs font-semibold whitespace-nowrap"
-          >
-            Show top
-          </span>
+      {/* Controls bar */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, alignItems: "center" }}>
+        {/* Search */}
+        <div className="cust-search-wrap" style={{ flex: "1 1 200px", minWidth: 180, maxWidth: 340, position: "relative" }}>
+          <span className="cust-search-icon">🔍</span>
           <input
-            type="number"
-            min={1}
-            max={1000}
+            type="text"
+            placeholder="Search customers…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: "100%", boxSizing: "border-box",
+              background: t.surface, border: `1px solid ${t.border2}`,
+              borderRadius: 10, padding: "9px 12px 9px 36px",
+              color: t.text, fontSize: 13, outline: "none",
+              fontFamily: "'Lato', sans-serif",
+            }}
+          />
+        </div>
+
+        {/* Filter mode */}
+        <select
+          value={filterMode}
+          onChange={(e) => setFilterMode(e.target.value)}
+          style={{
+            background: t.surface, border: `1px solid ${t.border2}`,
+            borderRadius: 10, padding: "9px 12px",
+            color: t.text, fontSize: 13, cursor: "pointer",
+            fontFamily: "'Lato', sans-serif", outline: "none",
+          }}
+        >
+          <option>All Customers</option>
+          <option>Top Customers</option>
+        </select>
+
+        {/* Show N */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+          <span style={{ color: t.subtle, fontSize: 12, whiteSpace: "nowrap", fontWeight: 600 }}>Show top</span>
+          <input
+            type="number" min={1} max={10000}
             value={topNInput}
             onChange={(e) => setTopNInput(e.target.value)}
             onBlur={applyTopN}
             onKeyDown={(e) => e.key === "Enter" && applyTopN()}
             style={{
-              background: t.surface2,
-              border: `1px solid ${t.border2}`,
-              color: t.text,
-              fontFamily: "'Lato', sans-serif",
-              width: 60,
+              width: 64, background: t.surface2, border: `1px solid ${t.border2}`,
+              borderRadius: 8, padding: "7px 10px",
+              color: t.text, fontSize: 13, textAlign: "center",
+              fontFamily: "'Lato', sans-serif", fontWeight: 700, outline: "none",
             }}
-            className="rounded-lg px-3 py-1.5 text-sm text-center outline-none font-bold"
           />
-          <span
-            style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
-            className="text-xs font-semibold"
-          >
-            customers
-          </span>
         </div>
       </div>
 
-      {/* Customer cards */}
+      {/* Table */}
       {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((k) => (
-            <div
-              key={k}
-              style={{ background: t.surface, border: `1px solid ${t.border}` }}
-              className="rounded-xl p-5 animate-pulse"
-            >
-              <div
-                style={{ background: t.surface2 }}
-                className="h-4 w-48 rounded-lg mb-3"
-              />
-              <div
-                style={{ background: t.surface2 }}
-                className="h-3 w-32 rounded-lg"
-              />
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, overflow: "hidden" }}>
+          {[1,2,3,4,5].map((k) => (
+            <div key={k} style={{ padding: "16px 20px", borderBottom: `1px solid ${t.border}`, display: "flex", gap: 16, alignItems: "center" }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: t.surface2, flexShrink: 0 }} className="animate-pulse" />
+              <div style={{ flex: 1 }}>
+                <div style={{ height: 13, width: "45%", background: t.surface2, borderRadius: 6, marginBottom: 6 }} className="animate-pulse" />
+                <div style={{ height: 10, width: "28%", background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+              </div>
+              <div style={{ height: 13, width: 60, background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+              <div style={{ height: 13, width: 80, background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
             </div>
           ))}
         </div>
-      ) : sorted.length === 0 ? (
-        <div
-          style={{ background: t.surface, border: `1px solid ${t.border}` }}
-          className="rounded-xl p-12 text-center"
-        >
-          <div className="text-5xl mb-4 opacity-20">👥</div>
-          <p
-            style={{
-              fontWeight: 700,
-              fontSize: 16,
-              color: t.text,
-              fontFamily: "'Lato', sans-serif",
-            }}
-          >
-            No customers yet
+      ) : filtered.length === 0 ? (
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: "60px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 48, opacity: 0.2, marginBottom: 12 }}>👥</div>
+          <p style={{ color: t.text, fontWeight: 700, fontSize: 15, margin: 0 }}>
+            {search ? "No customers match your search" : "No customers yet"}
           </p>
-          <p
-            style={{
-              color: t.muted,
-              fontSize: 14,
-              marginTop: 6,
-              fontFamily: "'Lato', sans-serif",
-            }}
-          >
-            Customers will appear once orders are placed.
+          <p style={{ color: t.muted, fontSize: 13, marginTop: 6 }}>
+            {search ? "Try a different name or phone number." : "Customers will appear once orders are placed."}
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {sorted.map((c, i) => {
-            const barW = (c.revenue / maxRevenue) * 100;
-            return (
-              <div
-                key={c.cust_id}
-                style={{
-                  background: t.surface,
-                  border: `1px solid ${i < 3 ? medalColor(i) + "55" : t.border}`,
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-                className="rounded-xl p-5 hover:shadow-md transition-shadow"
-              >
-                {/* Revenue bar background */}
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: `${barW}%`,
-                    background: i < 3 ? medalColor(i) + "08" : t.accent + "06",
-                    pointerEvents: "none",
-                    transition: "width .5s",
-                  }}
-                />
-                <div className="relative flex items-start gap-4 flex-wrap">
-                  {/* Rank + Avatar */}
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div style={{ minWidth: 28, textAlign: "center" }}>
-                      {medalEmoji(i) ? (
-                        <span style={{ fontSize: 22 }}>{medalEmoji(i)}</span>
-                      ) : (
-                        <span
-                          style={{
-                            color: t.muted,
-                            fontFamily: "'Lato', sans-serif",
-                            fontWeight: 700,
-                            fontSize: 13,
-                          }}
-                        >
-                          #{i + 1}
+        <div className="cust-table-wrap" style={{ background: t.surface, border: `1px solid ${t.border}` }}>
+          <table className="cust-table">
+            <thead style={{ background: t.surface2, borderBottom: `2px solid ${t.border2}` }}>
+              <tr>
+                <th style={{ color: t.subtle, paddingLeft: 20 }}>#</th>
+                <th style={{ color: t.subtle }}>Customer Name</th>
+                <th style={{ color: t.subtle }}>Phone Number</th>
+                <th
+                  style={{ color: sortBy === "orders" ? t.accent : t.subtle }}
+                  onClick={() => toggleSort("orders")}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Total Orders <SortIcon col="orders" />
+                  </span>
+                </th>
+                <th
+                  style={{ color: sortBy === "revenue" ? t.accent : t.subtle }}
+                  onClick={() => toggleSort("revenue")}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Bill Total <SortIcon col="revenue" />
+                  </span>
+                </th>
+                <th style={{ color: t.subtle }}>Broadcast</th>
+                <th
+                  style={{ color: sortBy === "joined" ? t.accent : t.subtle }}
+                  onClick={() => toggleSort("joined")}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Joined On <SortIcon col="joined" />
+                  </span>
+                </th>
+                <th style={{ color: t.subtle, textAlign: "center" }}>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c, i) => {
+                const avatarColors = [
+                  ["#C4711A","#f5e6d3"],["#2D7A4F","#d4eddf"],
+                  ["#6366F1","#e0e7ff"],["#EC4899","#fce7f3"],["#14B8A6","#ccfbf1"],
+                ];
+                const [ac, bgc] = avatarColors[Math.abs((c.name||"").charCodeAt(0)||0) % avatarColors.length];
+                const isTop3 = filterMode === "Top Customers" && i < 3;
+                const medalEmoji = i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉";
+                return (
+                  <tr
+                    key={c.cust_id}
+                    style={{
+                      background: i % 2 === 0 ? t.surface : t.surface2 + "88",
+                      borderBottom: `1px solid ${t.border}`,
+                    }}
+                  >
+                    {/* Rank */}
+                    <td style={{ color: t.muted, fontWeight: 700, fontSize: 12, paddingLeft: 20, width: 48 }}>
+                      {isTop3 ? medalEmoji : `#${i + 1}`}
+                    </td>
+
+                    {/* Name + avatar */}
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div className="cust-avatar" style={{ background: bgc, color: ac, minWidth: 34 }}>
+                          {(c.name || "?").split(" ").slice(0,2).map(w => w[0]?.toUpperCase()||"").join("") || "?"}
+                        </div>
+                        <span style={{ color: t.text, fontWeight: 600, fontSize: 13 }}>
+                          {c.name}
                         </span>
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        background: i < 3 ? medalColor(i) + "22" : t.surface2,
-                        border: `1px solid ${i < 3 ? medalColor(i) + "44" : t.border2}`,
-                        color: i < 3 ? medalColor(i) : t.muted,
-                      }}
-                      className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-base flex-shrink-0"
-                    >
-                      {(c.name || "?")[0].toUpperCase()}
-                    </div>
-                  </div>
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <p
-                        style={{
-                          color: t.text,
-                          fontFamily: "'Lato', sans-serif",
-                        }}
-                        className="text-base font-bold"
-                      >
-                        {c.name}
-                      </p>
-                      {c.phone !== "—" && (
-                        <p
-                          style={{
-                            color: t.muted,
-                            fontFamily: "'Lato', sans-serif",
-                          }}
-                          className="text-xs"
-                        >
-                          {c.phone}
-                        </p>
-                      )}
-                    </div>
-                    {c.lastOrder && (
-                      <p
-                        style={{
-                          color: t.muted,
-                          fontFamily: "'Lato', sans-serif",
-                        }}
-                        className="text-xs"
-                      >
-                        Last order:{" "}
-                        {new Date(c.lastOrder).toLocaleDateString("en-KW", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </p>
-                    )}
-                  </div>
-                  {/* Stats grid */}
-                  <div className="flex items-center gap-4 flex-shrink-0 flex-wrap">
-                    {[
-                      { label: "Orders", value: c.orders, color: t.accent },
-                      {
-                        label: "Total Spent",
-                        value: `KD ${c.revenue.toFixed(3)}`,
-                        color: t.green,
-                      },
-                      {
-                        label: "Avg Order",
-                        value: `KD ${c.avg.toFixed(3)}`,
-                        color: t.muted,
-                      },
-                    ].map(({ label, value, color }) => (
-                      <div
-                        key={label}
-                        style={{ textAlign: "center", minWidth: 70 }}
-                      >
-                        <p
-                          style={{
-                            color,
-                            fontFamily: "'Cormorant Garamond', serif",
-                            fontWeight: 800,
-                          }}
-                          className="text-xl leading-none"
-                        >
-                          {value}
-                        </p>
-                        <p
-                          style={{
-                            color: t.muted,
-                            fontFamily: "'Lato', sans-serif",
-                          }}
-                          className="text-xs mt-1"
-                        >
-                          {label}
-                        </p>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                    </td>
+
+                    {/* Phone */}
+                    <td style={{ color: t.subtle }}>
+                      {c.phone !== "—" ? c.phone : <span style={{ color: t.muted, fontStyle: "italic" }}>—</span>}
+                    </td>
+
+                    {/* Orders */}
+                    <td>
+                      <span style={{
+                        color: t.accent, fontWeight: 800,
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: 16,
+                      }}>
+                        {c.orders}
+                      </span>
+                    </td>
+
+                    {/* Bill Total */}
+                    <td>
+                      <span style={{
+                        color: t.green, fontWeight: 800,
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: 15,
+                      }}>
+                        KD {Number(c.revenue || 0).toFixed(3)}
+                      </span>
+                    </td>
+
+                    {/* Broadcast */}
+                    <td>
+                      {c.broadcast === true ? (
+                        <span style={{
+                          background: t.greenBg, border: `1px solid ${t.greenBorder}`,
+                          color: t.green, borderRadius: 999, padding: "3px 10px",
+                          fontSize: 11, fontWeight: 700,
+                        }}>Yes</span>
+                      ) : c.broadcast === false ? (
+                        <span style={{
+                          background: t.surface2, border: `1px solid ${t.border2}`,
+                          color: t.muted, borderRadius: 999, padding: "3px 10px",
+                          fontSize: 11, fontWeight: 700,
+                        }}>No</span>
+                      ) : (
+                        <span style={{ color: t.muted, fontStyle: "italic" }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Joined */}
+                    <td>
+                      <div>
+                        <div style={{ color: t.text, fontWeight: 700, fontSize: 12 }}>
+                          {fmtJoined(c.joined)}
+                        </div>
+                        {c.joined && (
+                          <div style={{ color: t.muted, fontSize: 11, marginTop: 1 }}>
+                            {fmtJoinedFull(c.joined)}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Details button */}
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        className="cust-detail-btn"
+                        onClick={() => setSelectedCustomer(c)}
+                        style={{ color: t.accent, background: t.accentBg, border: `1px solid ${t.accentBorder}` }}
+                        title="View customer details"
+                      >
+                        ℹ
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+      )}
+
+      {/* Flip card overlay */}
+      {selectedCustomer && (
+        <CustomerFlipCard
+          customer={selectedCustomer}
+          onClose={() => setSelectedCustomer(null)}
+          t={t}
+        />
       )}
     </div>
   );
