@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
-import './index.css';
+import "./index.css";
 
 // ─── Theme tokens ─────────────────────────────────────────────────────────────
 const LIGHT = {
@@ -840,10 +840,12 @@ function HomePage({ t, user }) {
       });
       setPayBreakdown(Object.values(payMap).sort((a, b) => b.total - a.total));
 
-      // 4. Time series — group accepted orders by day
+      // 4. Time series — group accepted orders by LOCAL day (not UTC)
       const dayMap = {};
       accepted.forEach((o) => {
-        const day = o.created_at.slice(0, 10);
+        // Convert to local date string to avoid UTC-vs-local off-by-one
+        const localDate = new Date(o.created_at);
+        const day = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, "0")}-${String(localDate.getDate()).padStart(2, "0")}`;
         if (!dayMap[day]) dayMap[day] = { v: 0, orders: 0 };
         dayMap[day].v += Number(o.total_amount || 0);
         dayMap[day].orders++;
@@ -1581,7 +1583,8 @@ function HomePage({ t, user }) {
       {topItems.length > 0 && !loading && (
         <Section title="Revenue by Item">
           <BarChart
-            data={topItems
+            data={[...topItems]
+              .sort((a, b) => b.revenue - a.revenue)
               .slice(0, 8)
               .map((it) => ({
                 l: it.name.length > 10 ? it.name.slice(0, 9) + "…" : it.name,
@@ -1593,40 +1596,43 @@ function HomePage({ t, user }) {
             t={t}
             valuePrefix="KD "
           />
-          {/* Full name legend */}
+          {/* Full name legend — sorted by revenue */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {topItems.slice(0, 8).map((it, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span
-                  style={{
-                    background: t.green,
-                    fontFamily: "'Lato', sans-serif",
-                    minWidth: 20,
-                    flexShrink: 0,
-                  }}
-                  className="text-xs text-white font-bold rounded px-1.5 py-0.5 text-center"
-                >
-                  {i + 1}
-                </span>
-                <p
-                  style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-                  className="text-xs truncate"
-                >
-                  {it.name}
-                </p>
-                <span
-                  style={{
-                    color: t.green,
-                    fontFamily: "'Lato', sans-serif",
-                    flexShrink: 0,
-                    marginLeft: "auto",
-                  }}
-                  className="text-xs font-bold"
-                >
-                  {fmtKDh(it.revenue)}
-                </span>
-              </div>
-            ))}
+            {[...topItems]
+              .sort((a, b) => b.revenue - a.revenue)
+              .slice(0, 8)
+              .map((it, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span
+                    style={{
+                      background: t.green,
+                      fontFamily: "'Lato', sans-serif",
+                      minWidth: 20,
+                      flexShrink: 0,
+                    }}
+                    className="text-xs text-white font-bold rounded px-1.5 py-0.5 text-center"
+                  >
+                    {i + 1}
+                  </span>
+                  <p
+                    style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
+                    className="text-xs truncate"
+                  >
+                    {it.name}
+                  </p>
+                  <span
+                    style={{
+                      color: t.green,
+                      fontFamily: "'Lato', sans-serif",
+                      flexShrink: 0,
+                      marginLeft: "auto",
+                    }}
+                    className="text-xs font-bold"
+                  >
+                    {fmtKDh(it.revenue)}
+                  </span>
+                </div>
+              ))}
           </div>
         </Section>
       )}
@@ -1705,9 +1711,10 @@ function DeliveryPage({ t, user }) {
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [delConfirm, setDelConfirm] = useState(null);
+  const [delConfirm, setDelConfirm] = useState(null); // kept for future but unused in UI
   const [formErr, setFormErr] = useState("");
   const [period, setPeriod] = useState("This Month");
+  const [showInactive, setShowInactive] = useState(false);
 
   const fetchRiders = useCallback(async () => {
     if (!restId) return;
@@ -1817,14 +1824,12 @@ function DeliveryPage({ t, user }) {
           .eq("id", editingId);
         if (error) throw error;
       } else {
-        const { error } = await supabase
-          .from("Delivery_Riders")
-          .insert({
-            rest_id: restId,
-            name: form.name.trim(),
-            phone: form.phone.trim(),
-            active: form.active,
-          });
+        const { error } = await supabase.from("Delivery_Riders").insert({
+          rest_id: restId,
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          active: form.active,
+        });
         if (error) throw error;
       }
       await fetchRiders();
@@ -1856,26 +1861,149 @@ function DeliveryPage({ t, user }) {
 
   return (
     <div className="p-5 md:p-8 max-w-5xl space-y-6 overflow-y-auto">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1
           style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text }}
           className="text-3xl md:text-4xl font-bold tracking-tight"
         >
           Delivery Riders
         </h1>
-        {!showForm && (
-          <button
-            onClick={openNew}
-            style={{
-              background: t.accent,
-              color: "#fff",
-              fontFamily: "'Lato', sans-serif",
-            }}
-            className="text-xs font-semibold px-4 py-2.5 rounded-lg tracking-wider hover:opacity-90 active:scale-95 transition-all shadow-sm"
-          >
-            + Add Rider
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Inactive riders button */}
+          {(() => {
+            const inactiveRiders = riders.filter((r) => !r.active);
+            return inactiveRiders.length > 0 ? (
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setShowInactive((v) => !v)}
+                  style={{
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                  }}
+                  className="text-xs font-semibold px-3 py-2.5 rounded-lg hover:opacity-80 transition-opacity flex items-center gap-2"
+                >
+                  <span style={{ opacity: 0.5 }}>🛵</span>
+                  Inactive ({inactiveRiders.length})
+                  <span style={{ fontSize: 9 }}>
+                    {showInactive ? "▲" : "▼"}
+                  </span>
+                </button>
+                {showInactive && (
+                  <>
+                    <div
+                      style={{ position: "fixed", inset: 0, zIndex: 49 }}
+                      onClick={() => setShowInactive(false)}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: 0,
+                        top: "calc(100% + 8px)",
+                        zIndex: 50,
+                        background: t.surface,
+                        border: `1px solid ${t.border}`,
+                        borderRadius: 14,
+                        padding: 12,
+                        minWidth: 260,
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.13)",
+                      }}
+                    >
+                      <p
+                        style={{
+                          color: t.subtle,
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: ".08em",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                        }}
+                      >
+                        Inactive Riders
+                      </p>
+                      <div className="space-y-2">
+                        {inactiveRiders.map((r) => (
+                          <div
+                            key={r.id}
+                            style={{
+                              background: t.surface2,
+                              border: `1px solid ${t.border2}`,
+                              opacity: 0.75,
+                            }}
+                            className="rounded-xl px-3 py-2.5 flex items-center gap-3"
+                          >
+                            <div
+                              style={{
+                                background: t.surface,
+                                border: `1px solid ${t.border2}`,
+                                color: t.muted,
+                              }}
+                              className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0"
+                            >
+                              {r.name[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p
+                                style={{
+                                  color: t.text,
+                                  fontFamily: "'Lato', sans-serif",
+                                }}
+                                className="text-sm font-semibold truncate"
+                              >
+                                {r.name}
+                              </p>
+                              <p
+                                style={{
+                                  color: t.muted,
+                                  fontFamily: "'Lato', sans-serif",
+                                }}
+                                className="text-xs"
+                              >
+                                {r.phone}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                toggleActive(r);
+                                setShowInactive(false);
+                              }}
+                              style={{
+                                background: t.greenBg,
+                                border: `1px solid ${t.greenBorder}`,
+                                color: t.green,
+                                fontFamily: "'Lato', sans-serif",
+                                flexShrink: 0,
+                              }}
+                              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
+                            >
+                              Activate
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null;
+          })()}
+          {!showForm && (
+            <button
+              onClick={openNew}
+              style={{
+                background: t.accent,
+                color: "#fff",
+                fontFamily: "'Lato', sans-serif",
+              }}
+              className="text-xs font-semibold px-4 py-2.5 rounded-lg tracking-wider hover:opacity-90 active:scale-95 transition-all shadow-sm"
+            >
+              + Add Rider
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Add/Edit Form */}
@@ -1940,39 +2068,6 @@ function DeliveryPage({ t, user }) {
               />
             </div>
           </div>
-          <div className="flex items-center gap-3 mb-4">
-            <label
-              style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
-              className="text-xs font-bold tracking-widest uppercase"
-            >
-              Status
-            </label>
-            <div className="flex items-center gap-2">
-              {["Active", "Inactive"].map((s) => (
-                <button
-                  key={s}
-                  onClick={() =>
-                    setForm((p) => ({ ...p, active: s === "Active" }))
-                  }
-                  style={{
-                    background:
-                      (form.active ? "Active" : "Inactive") === s
-                        ? t.accentBg
-                        : t.surface2,
-                    border: `1px solid ${(form.active ? "Active" : "Inactive") === s ? t.accentBorder : t.border2}`,
-                    color:
-                      (form.active ? "Active" : "Inactive") === s
-                        ? t.accent
-                        : t.subtle,
-                    fontFamily: "'Lato', sans-serif",
-                  }}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
           {formErr && (
             <p
               style={{ color: t.red, fontFamily: "'Lato', sans-serif" }}
@@ -2010,7 +2105,7 @@ function DeliveryPage({ t, user }) {
         </div>
       )}
 
-      {/* Riders list */}
+      {/* Active Riders list only */}
       {loading ? (
         <p
           style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
@@ -2018,7 +2113,7 @@ function DeliveryPage({ t, user }) {
         >
           Loading riders…
         </p>
-      ) : riders.length === 0 && !showForm ? (
+      ) : riders.filter((r) => r.active).length === 0 && !showForm ? (
         <div
           style={{ background: t.surface, border: `1px solid ${t.border}` }}
           className="rounded-xl p-10 text-center"
@@ -2028,155 +2123,102 @@ function DeliveryPage({ t, user }) {
             style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
             className="text-sm"
           >
-            No riders yet. Add your first delivery rider.
+            No active riders. Add a rider or activate an inactive one.
           </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {riders.map((r) => (
-            <div
-              key={r.id}
-              style={{
-                background: t.surface,
-                border: `1px solid ${r.active ? t.border : t.border2}`,
-                opacity: r.active ? 1 : 0.65,
-              }}
-              className="rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap"
-            >
-              {/* Avatar */}
+          {riders
+            .filter((r) => r.active)
+            .map((r) => (
               <div
+                key={r.id}
                 style={{
-                  background: r.active ? t.accentBg : t.surface2,
-                  border: `1px solid ${r.active ? t.accentBorder : t.border2}`,
-                  color: r.active ? t.accent : t.muted,
+                  background: t.surface,
+                  border: `1px solid ${t.border}`,
                 }}
-                className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
+                className="rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap"
               >
-                {r.name[0].toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p
-                    style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-                    className="text-sm font-semibold"
-                  >
-                    {r.name}
-                  </p>
-                  {r.is_default && (
+                <div
+                  style={{
+                    background: t.accentBg,
+                    border: `1px solid ${t.accentBorder}`,
+                    color: t.accent,
+                  }}
+                  className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
+                >
+                  {r.name[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p
+                      style={{
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                      }}
+                      className="text-sm font-semibold"
+                    >
+                      {r.name}
+                    </p>
+                    {r.is_default && (
+                      <span
+                        style={{
+                          background: t.accentBg,
+                          color: t.accent,
+                          border: `1px solid ${t.accentBorder}`,
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                        className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      >
+                        Default
+                      </span>
+                    )}
                     <span
                       style={{
-                        background: t.accentBg,
-                        color: t.accent,
-                        border: `1px solid ${t.accentBorder}`,
+                        background: t.greenBg,
+                        color: t.green,
+                        border: `1px solid ${t.greenBorder}`,
                         fontFamily: "'Lato', sans-serif",
                       }}
                       className="text-xs font-bold px-2 py-0.5 rounded-full"
                     >
-                      Default
+                      Active
                     </span>
-                  )}
-                  <span
-                    style={{
-                      background: r.active ? t.greenBg : t.surface2,
-                      color: r.active ? t.green : t.muted,
-                      border: `1px solid ${r.active ? t.greenBorder : t.border2}`,
-                      fontFamily: "'Lato', sans-serif",
-                    }}
-                    className="text-xs font-bold px-2 py-0.5 rounded-full"
-                  >
-                    {r.active ? "Active" : "Inactive"}
-                  </span>
-                </div>
-                <p
-                  style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
-                  className="text-xs mt-0.5"
-                >
-                  {r.phone}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => toggleActive(r)}
-                  style={{
-                    color: t.subtle,
-                    border: `1px solid ${t.border2}`,
-                    fontFamily: "'Lato', sans-serif",
-                  }}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-70 transition-opacity"
-                >
-                  {r.active ? "Deactivate" : "Activate"}
-                </button>
-                <button
-                  onClick={() => openEdit(r)}
-                  style={{
-                    color: t.accent,
-                    border: `1px solid ${t.accentBorder}`,
-                    background: t.accentBg,
-                    fontFamily: "'Lato', sans-serif",
-                  }}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
-                >
-                  ✏️ Edit
-                </button>
-                {!r.is_default && (
-                  <button
-                    onClick={() => setDelConfirm(r.id)}
-                    style={{
-                      color: t.red,
-                      border: `1px solid #FECACA`,
-                      background: "#FEF2F2",
-                      fontFamily: "'Lato', sans-serif",
-                    }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
-                  >
-                    🗑️
-                  </button>
-                )}
-              </div>
-              {delConfirm === r.id && (
-                <div
-                  style={{
-                    background: "#FEF2F2",
-                    border: "1px solid #FECACA",
-                    borderRadius: 10,
-                  }}
-                  className="w-full p-3 flex items-center gap-3"
-                >
+                  </div>
                   <p
-                    style={{
-                      color: "#B83232",
-                      fontFamily: "'Lato', sans-serif",
-                    }}
-                    className="text-sm flex-1"
+                    style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
+                    className="text-xs mt-0.5"
                   >
-                    Delete {r.name}? Past orders will retain rider info.
+                    {r.phone}
                   </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setDelConfirm(null)}
+                    onClick={() => toggleActive(r)}
                     style={{
                       color: t.subtle,
                       border: `1px solid ${t.border2}`,
                       fontFamily: "'Lato', sans-serif",
                     }}
-                    className="text-xs px-3 py-1.5 rounded-lg"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-70 transition-opacity"
                   >
-                    Cancel
+                    Deactivate
                   </button>
                   <button
-                    onClick={() => deleteRider(r.id)}
+                    onClick={() => openEdit(r)}
                     style={{
-                      background: t.red,
-                      color: "#fff",
+                      color: t.accent,
+                      border: `1px solid ${t.accentBorder}`,
+                      background: t.accentBg,
                       fontFamily: "'Lato', sans-serif",
                     }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
                   >
-                    Delete
+                    ✏️ Edit
                   </button>
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
         </div>
       )}
 
@@ -2336,6 +2378,424 @@ function DeliveryPage({ t, user }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Customers Page ───────────────────────────────────────────────────────────
+function CustomersPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [topN, setTopN] = useState(15);
+  const [topNInput, setTopNInput] = useState("15");
+  const [sortBy, setSortBy] = useState("revenue"); // revenue | orders | avg
+
+  const load = useCallback(async () => {
+    if (!restId) {
+      setLoading(false);
+      setErr("No restaurant linked.");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      // Fetch all delivered/accepted orders for this restaurant
+      const { data: orders, error: oErr } = await supabase
+        .from("Orders")
+        .select("id, cust_id, total_amount, status, created_at")
+        .eq("rest_id", restId)
+        .in("status", ["delivered", "accepted", "preparing", "on_the_way"]);
+      if (oErr) throw oErr;
+
+      // Aggregate per customer
+      const custMap = {};
+      (orders || []).forEach((o) => {
+        if (!custMap[o.cust_id])
+          custMap[o.cust_id] = {
+            cust_id: o.cust_id,
+            orders: 0,
+            revenue: 0,
+            lastOrder: null,
+          };
+        custMap[o.cust_id].orders++;
+        custMap[o.cust_id].revenue += Number(o.total_amount || 0);
+        const d = new Date(o.created_at);
+        if (
+          !custMap[o.cust_id].lastOrder ||
+          d > new Date(custMap[o.cust_id].lastOrder)
+        ) {
+          custMap[o.cust_id].lastOrder = o.created_at;
+        }
+      });
+
+      const custIds = Object.keys(custMap);
+      if (custIds.length === 0) {
+        setCustomers([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch customer profiles
+      const { data: profiles, error: pErr } = await supabase
+        .from("Customer")
+        .select("id, cust_name, ph_num, joined_on")
+        .in("id", custIds);
+      if (pErr) throw pErr;
+
+      const profileMap = {};
+      (profiles || []).forEach((p) => {
+        profileMap[p.id] = p;
+      });
+
+      const list = custIds.map((cid) => {
+        const agg = custMap[cid];
+        const prof = profileMap[cid] || {};
+        return {
+          ...agg,
+          name: prof.cust_name || "—",
+          phone: prof.ph_num || "—",
+          joined: prof.joined_on || null,
+          avg: agg.orders > 0 ? agg.revenue / agg.orders : 0,
+        };
+      });
+
+      setCustomers(list);
+    } catch (e) {
+      console.error("[CustomersPage]", e);
+      setErr(e.message || "Failed to load customers.");
+    } finally {
+      setLoading(false);
+    }
+  }, [restId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const sorted = [...customers]
+    .sort((a, b) => {
+      if (sortBy === "orders") return b.orders - a.orders;
+      if (sortBy === "avg") return b.avg - a.avg;
+      return b.revenue - a.revenue;
+    })
+    .slice(0, topN);
+
+  const applyTopN = () => {
+    const n = parseInt(topNInput, 10);
+    if (!isNaN(n) && n > 0 && n <= 1000) setTopN(n);
+    else setTopNInput(String(topN));
+  };
+
+  const medalColor = (i) =>
+    i === 0 ? "#F59E0B" : i === 1 ? "#9CA3AF" : i === 2 ? "#B45309" : t.muted;
+  const medalEmoji = (i) =>
+    i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+
+  const maxRevenue = sorted[0]?.revenue || 1;
+
+  return (
+    <div className="p-5 md:p-8 max-w-5xl space-y-6 overflow-y-auto">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1
+            style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text }}
+            className="text-3xl md:text-4xl font-bold tracking-tight"
+          >
+            Customers
+          </h1>
+          <p
+            style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
+            className="text-sm mt-0.5"
+          >
+            {loading
+              ? "Loading…"
+              : `${customers.length} customer${customers.length !== 1 ? "s" : ""} · showing top ${Math.min(topN, customers.length)}`}
+          </p>
+        </div>
+        <button
+          onClick={load}
+          style={{
+            background: t.surface2,
+            border: `1px solid ${t.border2}`,
+            color: t.subtle,
+            fontFamily: "'Lato', sans-serif",
+          }}
+          className="text-xs font-semibold px-3 py-2 rounded-lg hover:opacity-70 transition-opacity"
+        >
+          Refresh ↺
+        </button>
+      </div>
+
+      {err && (
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#B83232",
+            fontFamily: "'Lato', sans-serif",
+          }}
+          className="rounded-xl px-4 py-3 text-sm"
+        >
+          ⚠️ {err}
+        </div>
+      )}
+
+      {/* Controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Sort */}
+        <div
+          style={{ borderBottom: `1px solid ${t.border}` }}
+          className="flex gap-0"
+        >
+          {[
+            ["revenue", "By Revenue"],
+            ["orders", "By Orders"],
+            ["avg", "By Avg Order"],
+          ].map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setSortBy(v)}
+              style={{
+                color: sortBy === v ? t.accent : t.subtle,
+                borderBottomColor: sortBy === v ? t.accent : "transparent",
+                fontFamily: "'Lato', sans-serif",
+              }}
+              className="pb-2 px-4 text-xs font-bold border-b-2 transition-colors whitespace-nowrap tracking-wider uppercase"
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+        {/* Top N control */}
+        <div className="flex items-center gap-2 ml-auto">
+          <span
+            style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
+            className="text-xs font-semibold whitespace-nowrap"
+          >
+            Show top
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            value={topNInput}
+            onChange={(e) => setTopNInput(e.target.value)}
+            onBlur={applyTopN}
+            onKeyDown={(e) => e.key === "Enter" && applyTopN()}
+            style={{
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              width: 60,
+            }}
+            className="rounded-lg px-3 py-1.5 text-sm text-center outline-none font-bold"
+          />
+          <span
+            style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
+            className="text-xs font-semibold"
+          >
+            customers
+          </span>
+        </div>
+      </div>
+
+      {/* Customer cards */}
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((k) => (
+            <div
+              key={k}
+              style={{ background: t.surface, border: `1px solid ${t.border}` }}
+              className="rounded-xl p-5 animate-pulse"
+            >
+              <div
+                style={{ background: t.surface2 }}
+                className="h-4 w-48 rounded-lg mb-3"
+              />
+              <div
+                style={{ background: t.surface2 }}
+                className="h-3 w-32 rounded-lg"
+              />
+            </div>
+          ))}
+        </div>
+      ) : sorted.length === 0 ? (
+        <div
+          style={{ background: t.surface, border: `1px solid ${t.border}` }}
+          className="rounded-xl p-12 text-center"
+        >
+          <div className="text-5xl mb-4 opacity-20">👥</div>
+          <p
+            style={{
+              fontWeight: 700,
+              fontSize: 16,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+            }}
+          >
+            No customers yet
+          </p>
+          <p
+            style={{
+              color: t.muted,
+              fontSize: 14,
+              marginTop: 6,
+              fontFamily: "'Lato', sans-serif",
+            }}
+          >
+            Customers will appear once orders are placed.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {sorted.map((c, i) => {
+            const barW = (c.revenue / maxRevenue) * 100;
+            return (
+              <div
+                key={c.cust_id}
+                style={{
+                  background: t.surface,
+                  border: `1px solid ${i < 3 ? medalColor(i) + "55" : t.border}`,
+                  position: "relative",
+                  overflow: "hidden",
+                }}
+                className="rounded-xl p-5 hover:shadow-md transition-shadow"
+              >
+                {/* Revenue bar background */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: `${barW}%`,
+                    background: i < 3 ? medalColor(i) + "08" : t.accent + "06",
+                    pointerEvents: "none",
+                    transition: "width .5s",
+                  }}
+                />
+                <div className="relative flex items-start gap-4 flex-wrap">
+                  {/* Rank + Avatar */}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div style={{ minWidth: 28, textAlign: "center" }}>
+                      {medalEmoji(i) ? (
+                        <span style={{ fontSize: 22 }}>{medalEmoji(i)}</span>
+                      ) : (
+                        <span
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 13,
+                          }}
+                        >
+                          #{i + 1}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        background: i < 3 ? medalColor(i) + "22" : t.surface2,
+                        border: `1px solid ${i < 3 ? medalColor(i) + "44" : t.border2}`,
+                        color: i < 3 ? medalColor(i) : t.muted,
+                      }}
+                      className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-base flex-shrink-0"
+                    >
+                      {(c.name || "?")[0].toUpperCase()}
+                    </div>
+                  </div>
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <p
+                        style={{
+                          color: t.text,
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                        className="text-base font-bold"
+                      >
+                        {c.name}
+                      </p>
+                      {c.phone !== "—" && (
+                        <p
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                          }}
+                          className="text-xs"
+                        >
+                          {c.phone}
+                        </p>
+                      )}
+                    </div>
+                    {c.lastOrder && (
+                      <p
+                        style={{
+                          color: t.muted,
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                        className="text-xs"
+                      >
+                        Last order:{" "}
+                        {new Date(c.lastOrder).toLocaleDateString("en-KW", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  {/* Stats grid */}
+                  <div className="flex items-center gap-4 flex-shrink-0 flex-wrap">
+                    {[
+                      { label: "Orders", value: c.orders, color: t.accent },
+                      {
+                        label: "Total Spent",
+                        value: `KD ${c.revenue.toFixed(3)}`,
+                        color: t.green,
+                      },
+                      {
+                        label: "Avg Order",
+                        value: `KD ${c.avg.toFixed(3)}`,
+                        color: t.muted,
+                      },
+                    ].map(({ label, value, color }) => (
+                      <div
+                        key={label}
+                        style={{ textAlign: "center", minWidth: 70 }}
+                      >
+                        <p
+                          style={{
+                            color,
+                            fontFamily: "'Cormorant Garamond', serif",
+                            fontWeight: 800,
+                          }}
+                          className="text-xl leading-none"
+                        >
+                          {value}
+                        </p>
+                        <p
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                          }}
+                          className="text-xs mt-1"
+                        >
+                          {label}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -7617,6 +8077,8 @@ export default function Dashboard({ user, onLogout }) {
         return <OrdersPage t={t} user={user} />;
       case "delivery":
         return <DeliveryPage t={t} user={user} />;
+      case "customers":
+        return <CustomersPage t={t} user={user} />;
       case "menu":
         return <MenuPage t={t} user={user} />;
       default:

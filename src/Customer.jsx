@@ -602,10 +602,16 @@ a{text-decoration:none}
 .country-search{width:100%;padding:10px 14px;border:none;border-bottom:1px solid var(--border);font-size:13px;font-family:var(--font);outline:none;color:var(--t1)}
 
 /* ── order history ── */
-.order-card{border:1.5px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px}
+.order-card{border:1.5px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:border-color .15s,background .15s}
+.order-card:hover{border-color:#bbb}
 .order-card.active{border-color:var(--orange);background:#fff9f6}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .active-dot{width:8px;height:8px;border-radius:50%;background:var(--orange);animation:pulse 1.6s ease-in-out infinite;display:inline-block;margin-right:6px;vertical-align:middle}
+
+/* ── order detail sheet ── */
+.order-detail-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}
+.order-detail-row:last-child{border-bottom:none}
+.rider-card{background:#f0fdf4;border:1.5px solid #B8DEC9;border-radius:var(--r-sm);padding:14px 16px;margin-bottom:16px}
 `;
 
 /* ── misc atoms ───────────────────────────────────────────────────────────── */
@@ -2289,6 +2295,7 @@ function ProfileSheet({
   });
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [selOrder, setSelOrder] = useState(null); // order detail sheet
 
   // Address editing state
   const [addrView, setAddrView] = useState("list"); // "list" | "form" | "map"
@@ -2942,85 +2949,28 @@ function ProfileSheet({
                       <div
                         key={o.id}
                         className={`order-card${isActive ? " active" : ""}`}
+                        onClick={() => setSelOrder(o)}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            marginBottom: 6,
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 8,
-                            }}
-                          >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             {isActive && <span className="active-dot" />}
-                            <span style={{ fontWeight: 700, fontSize: 14 }}>
-                              Order #{o.id}
-                            </span>
+                            <span style={{ fontWeight: 700, fontSize: 14 }}>Order #{o.id}</span>
                           </div>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: statusColor(o.status),
-                              background: isActive
-                                ? "#fff0e8"
-                                : o.status === "delivered"
-                                  ? "var(--green-l)"
-                                  : "#f5f5f5",
-                              padding: "3px 9px",
-                              borderRadius: 99,
-                            }}
-                          >
+                          <span style={{ fontSize: 11, fontWeight: 700, color: statusColor(o.status), background: isActive ? "#fff0e8" : o.status === "delivered" ? "var(--green-l)" : "#f5f5f5", padding: "3px 9px", borderRadius: 99 }}>
                             {statusLabel(o.status)}
                           </span>
                         </div>
-                        <p
-                          style={{
-                            fontSize: 13,
-                            color: "var(--t2)",
-                            marginBottom: 4,
-                          }}
-                        >
-                          {new Date(o.created_at).toLocaleDateString("en-KW", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                        <p style={{ fontSize: 13, color: "var(--t2)", marginBottom: 4 }}>
+                          {new Date(o.created_at).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                         </p>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                          }}
-                        >
-                          <span style={{ fontSize: 13, color: "var(--t3)" }}>
-                            {o.payment_method}
-                          </span>
-                          <span style={{ fontWeight: 800, fontSize: 15 }}>
-                            {fmt(o.total_amount)}
-                          </span>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 13, color: "var(--t3)" }}>{o.payment_method}</span>
+                          <span style={{ fontWeight: 800, fontSize: 15 }}>{fmt(o.total_amount)}</span>
                         </div>
                         {o.notes && (
-                          <p
-                            style={{
-                              fontSize: 12,
-                              color: "var(--t3)",
-                              fontStyle: "italic",
-                              marginTop: 4,
-                            }}
-                          >
-                            "{o.notes}"
-                          </p>
+                          <p style={{ fontSize: 12, color: "var(--t3)", fontStyle: "italic", marginTop: 4 }}>"{o.notes}"</p>
                         )}
+                        <p style={{ fontSize: 11, color: "var(--t3)", marginTop: 6, fontWeight: 500 }}>Tap to view details →</p>
                       </div>
                     );
                   })}
@@ -3041,6 +2991,14 @@ function ProfileSheet({
           )}
         </div>
       </div>
+
+      {/* Order detail sheet — stacked on top of ProfileSheet */}
+      {selOrder && (
+        <OrderDetailSheet
+          order={selOrder}
+          onClose={() => setSelOrder(null)}
+        />
+      )}
 
       {/* Map picker sheet — stacked on top */}
       {showMapPicker && (
@@ -3584,11 +3542,11 @@ export default function Customer() {
     try {
       const { data } = await supabase
         .from("Orders")
-        .select("id, status, total_amount, payment_method, created_at, notes")
+        .select("id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone")
         .eq("cust_id", cid)
         .eq("rest_id", restId)
         .order("created_at", { ascending: false })
-        .limit(30);
+        .limit(50);
       setOrderHistory(data || []);
     } catch (e) {
       console.error("[loadOrderHistory]", e);
@@ -3596,6 +3554,25 @@ export default function Customer() {
       setOrdersLoading(false);
     }
   };
+
+  // Realtime order status updates in history
+  useEffect(() => {
+    if (!customer?.id || !restId) return;
+    const ch = supabase
+      .channel(`cust-orders-${customer.id}`)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "Orders",
+        filter: `cust_id=eq.${customer.id}`,
+      }, (payload) => {
+        setOrderHistory((prev) =>
+          prev.map((o) => o.id === payload.new.id ? { ...o, ...payload.new } : o)
+        );
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [customer?.id, restId]);
 
   /* filtered menu */
   const filtered = menuItems.filter((m) => {
@@ -4612,6 +4589,185 @@ export default function Customer() {
           onLoadOrders={() => loadOrderHistory(customer?.id)}
         />
       )}
+    </>
+  );
+}
+
+/* ── OrderDetailSheet ────────────────────────────────────────────────────────── */
+function OrderDetailSheet({ order, onClose }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [liveOrder, setLiveOrder] = useState(order);
+
+  // Realtime status updates while sheet is open
+  useEffect(() => {
+    if (!order?.id) return;
+    const ch = supabase
+      .channel(`ord-detail-${order.id}`)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "Orders",
+        filter: `id=eq.${order.id}`,
+      }, (payload) => {
+        setLiveOrder((prev) => ({ ...prev, ...payload.new }));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [order?.id]);
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("Order_Items")
+          .select("id, menu_id, quantity, unit_price, subtotal, item_note, Menu(name)")
+          .eq("order_id", order.id);
+        if (error) throw error;
+        // Fetch variant options per item
+        const enriched = await Promise.all((data || []).map(async (it) => {
+          const { data: vars } = await supabase
+            .from("Order_Item_Variants")
+            .select(`price_adj, "Variant Options"(name)`)
+            .eq("order_item_id", it.id);
+          return {
+            ...it,
+            menuName: it.Menu?.name || "Item",
+            variants: (vars || []).map((v) => v["Variant Options"]?.name).filter(Boolean),
+          };
+        }));
+        setItems(enriched);
+      } catch (e) {
+        console.error("[OrderDetailSheet]", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [order.id]);
+
+  const STATUS_LABELS = {
+    pending: "Pending",
+    accepted: "Accepted",
+    preparing: "Preparing 👨‍🍳",
+    on_the_way: "On the way 🛵",
+    delivered: "Delivered ✅",
+    rejected: "Rejected",
+  };
+  const STATUS_COLORS = {
+    pending: "var(--orange)",
+    accepted: "#2563EB",
+    preparing: "#7C3AED",
+    on_the_way: "var(--green)",
+    delivered: "var(--green)",
+    rejected: "var(--red)",
+  };
+
+  const ACTIVE = ["pending", "accepted", "preparing", "on_the_way"];
+  const isActive = ACTIVE.includes(liveOrder.status);
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose} />
+      <div className="sheet" style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}>
+        <div className="drag-pill" />
+        {/* Header */}
+        <div className="sheet-hd" style={{ paddingBottom: 10, flexShrink: 0 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p className="sheet-title" style={{ fontSize: 17 }}>Order #{liveOrder.id}</p>
+            <p style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>
+              {new Date(liveOrder.created_at).toLocaleString("en-KW", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 99, background: isActive ? "#fff0e8" : liveOrder.status === "delivered" ? "#f0fdf4" : "#f5f5f5", color: STATUS_COLORS[liveOrder.status] || "var(--t2)" }}>
+              {isActive && <span className="active-dot" />}
+              {STATUS_LABELS[liveOrder.status] || liveOrder.status}
+            </span>
+            <button className="close-btn" onClick={onClose}>{Ic.close}</button>
+          </div>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 20px" }}>
+
+          {/* Rider info — highlighted */}
+          {(liveOrder.delivery_rider_name) && (
+            <div className="rider-card" style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>🛵 Delivery Rider</p>
+              <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{liveOrder.delivery_rider_name}</p>
+              {liveOrder.delivery_rider_phone && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
+                  <p style={{ fontSize: 14, color: "var(--t2)" }}>{liveOrder.delivery_rider_phone}</p>
+                  <a href={`https://wa.me/${liveOrder.delivery_rider_phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
+                    style={{ background: "#25D366", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    💬 WhatsApp
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Order items */}
+          <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Items</p>
+          {loading ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: "20px 0" }}><Spinner size={24} /></div>
+          ) : items.length === 0 ? (
+            <p style={{ color: "var(--t3)", fontSize: 13, padding: "12px 0" }}>No items found</p>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              {items.map((it, i) => (
+                <div key={i} className="order-detail-row">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontWeight: 600, fontSize: 14 }}>{it.menuName}</p>
+                    {it.variants?.length > 0 && (
+                      <p style={{ fontSize: 12, color: "var(--orange)", marginTop: 2 }}>
+                        {it.variants.join(" · ")}
+                      </p>
+                    )}
+                    {it.item_note && (
+                      <p style={{ fontSize: 11, color: "var(--t3)", fontStyle: "italic", marginTop: 2 }}>📝 {it.item_note}</p>
+                    )}
+                  </div>
+                  <div style={{ flexShrink: 0, textAlign: "right" }}>
+                    <p style={{ fontSize: 13, color: "var(--t2)" }}>×{it.quantity}</p>
+                    <p style={{ fontSize: 14, fontWeight: 700 }}>{fmt(it.subtotal)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Customer note */}
+          {liveOrder.notes && (
+            <div style={{ background: "#fafafa", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: "12px 14px", marginBottom: 16 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Your note</p>
+              <p style={{ fontSize: 13, color: "var(--t2)", fontStyle: "italic" }}>{liveOrder.notes}</p>
+            </div>
+          )}
+
+          {/* Order summary */}
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 13, color: "var(--t2)" }}>Payment</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{liveOrder.payment_method}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Total</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "var(--orange)" }}>{fmt(liveOrder.total_amount)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Close footer */}
+        <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))", flexShrink: 0 }}>
+          <button className="btn-out" style={{ width: "100%", justifyContent: "center" }} onClick={onClose}>Close</button>
+        </div>
+      </div>
     </>
   );
 }
