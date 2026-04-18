@@ -153,7 +153,7 @@ export function PricingSection() {
               </ul>
 
               <a
-                href="https://calendly.com/YOUR-USERNAME/15min"
+                href="https://calendly.com/ungrie-com/30min"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`w-full py-4 rounded-xl font-bold transition-all active:scale-[0.98] text-center flex items-center justify-center ${
