@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
-import './index.css';
+import "./index.css";
 
 // ─── Theme tokens ─────────────────────────────────────────────────────────────
 const LIGHT = {
@@ -840,10 +840,12 @@ function HomePage({ t, user }) {
       });
       setPayBreakdown(Object.values(payMap).sort((a, b) => b.total - a.total));
 
-      // 4. Time series — group accepted orders by day
+      // 4. Time series — group accepted orders by LOCAL day (not UTC)
       const dayMap = {};
       accepted.forEach((o) => {
-        const day = o.created_at.slice(0, 10);
+        // Convert to local date string to avoid UTC-vs-local off-by-one
+        const localDate = new Date(o.created_at);
+        const day = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, "0")}-${String(localDate.getDate()).padStart(2, "0")}`;
         if (!dayMap[day]) dayMap[day] = { v: 0, orders: 0 };
         dayMap[day].v += Number(o.total_amount || 0);
         dayMap[day].orders++;
@@ -1581,7 +1583,8 @@ function HomePage({ t, user }) {
       {topItems.length > 0 && !loading && (
         <Section title="Revenue by Item">
           <BarChart
-            data={topItems
+            data={[...topItems]
+              .sort((a, b) => b.revenue - a.revenue)
               .slice(0, 8)
               .map((it) => ({
                 l: it.name.length > 10 ? it.name.slice(0, 9) + "…" : it.name,
@@ -1593,40 +1596,43 @@ function HomePage({ t, user }) {
             t={t}
             valuePrefix="KD "
           />
-          {/* Full name legend */}
+          {/* Full name legend — sorted by revenue */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {topItems.slice(0, 8).map((it, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span
-                  style={{
-                    background: t.green,
-                    fontFamily: "'Lato', sans-serif",
-                    minWidth: 20,
-                    flexShrink: 0,
-                  }}
-                  className="text-xs text-white font-bold rounded px-1.5 py-0.5 text-center"
-                >
-                  {i + 1}
-                </span>
-                <p
-                  style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-                  className="text-xs truncate"
-                >
-                  {it.name}
-                </p>
-                <span
-                  style={{
-                    color: t.green,
-                    fontFamily: "'Lato', sans-serif",
-                    flexShrink: 0,
-                    marginLeft: "auto",
-                  }}
-                  className="text-xs font-bold"
-                >
-                  {fmtKDh(it.revenue)}
-                </span>
-              </div>
-            ))}
+            {[...topItems]
+              .sort((a, b) => b.revenue - a.revenue)
+              .slice(0, 8)
+              .map((it, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span
+                    style={{
+                      background: t.green,
+                      fontFamily: "'Lato', sans-serif",
+                      minWidth: 20,
+                      flexShrink: 0,
+                    }}
+                    className="text-xs text-white font-bold rounded px-1.5 py-0.5 text-center"
+                  >
+                    {i + 1}
+                  </span>
+                  <p
+                    style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
+                    className="text-xs truncate"
+                  >
+                    {it.name}
+                  </p>
+                  <span
+                    style={{
+                      color: t.green,
+                      fontFamily: "'Lato', sans-serif",
+                      flexShrink: 0,
+                      marginLeft: "auto",
+                    }}
+                    className="text-xs font-bold"
+                  >
+                    {fmtKDh(it.revenue)}
+                  </span>
+                </div>
+              ))}
           </div>
         </Section>
       )}
@@ -1705,9 +1711,10 @@ function DeliveryPage({ t, user }) {
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [delConfirm, setDelConfirm] = useState(null);
+  const [delConfirm, setDelConfirm] = useState(null); // kept for future but unused in UI
   const [formErr, setFormErr] = useState("");
   const [period, setPeriod] = useState("This Month");
+  const [showInactive, setShowInactive] = useState(false);
 
   const fetchRiders = useCallback(async () => {
     if (!restId) return;
@@ -1817,14 +1824,12 @@ function DeliveryPage({ t, user }) {
           .eq("id", editingId);
         if (error) throw error;
       } else {
-        const { error } = await supabase
-          .from("Delivery_Riders")
-          .insert({
-            rest_id: restId,
-            name: form.name.trim(),
-            phone: form.phone.trim(),
-            active: form.active,
-          });
+        const { error } = await supabase.from("Delivery_Riders").insert({
+          rest_id: restId,
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          active: form.active,
+        });
         if (error) throw error;
       }
       await fetchRiders();
@@ -1856,26 +1861,149 @@ function DeliveryPage({ t, user }) {
 
   return (
     <div className="p-5 md:p-8 max-w-5xl space-y-6 overflow-y-auto">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1
           style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text }}
           className="text-3xl md:text-4xl font-bold tracking-tight"
         >
           Delivery Riders
         </h1>
-        {!showForm && (
-          <button
-            onClick={openNew}
-            style={{
-              background: t.accent,
-              color: "#fff",
-              fontFamily: "'Lato', sans-serif",
-            }}
-            className="text-xs font-semibold px-4 py-2.5 rounded-lg tracking-wider hover:opacity-90 active:scale-95 transition-all shadow-sm"
-          >
-            + Add Rider
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Inactive riders button */}
+          {(() => {
+            const inactiveRiders = riders.filter((r) => !r.active);
+            return inactiveRiders.length > 0 ? (
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setShowInactive((v) => !v)}
+                  style={{
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                  }}
+                  className="text-xs font-semibold px-3 py-2.5 rounded-lg hover:opacity-80 transition-opacity flex items-center gap-2"
+                >
+                  <span style={{ opacity: 0.5 }}>🛵</span>
+                  Inactive ({inactiveRiders.length})
+                  <span style={{ fontSize: 9 }}>
+                    {showInactive ? "▲" : "▼"}
+                  </span>
+                </button>
+                {showInactive && (
+                  <>
+                    <div
+                      style={{ position: "fixed", inset: 0, zIndex: 49 }}
+                      onClick={() => setShowInactive(false)}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: 0,
+                        top: "calc(100% + 8px)",
+                        zIndex: 50,
+                        background: t.surface,
+                        border: `1px solid ${t.border}`,
+                        borderRadius: 14,
+                        padding: 12,
+                        minWidth: 260,
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.13)",
+                      }}
+                    >
+                      <p
+                        style={{
+                          color: t.subtle,
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: ".08em",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                        }}
+                      >
+                        Inactive Riders
+                      </p>
+                      <div className="space-y-2">
+                        {inactiveRiders.map((r) => (
+                          <div
+                            key={r.id}
+                            style={{
+                              background: t.surface2,
+                              border: `1px solid ${t.border2}`,
+                              opacity: 0.75,
+                            }}
+                            className="rounded-xl px-3 py-2.5 flex items-center gap-3"
+                          >
+                            <div
+                              style={{
+                                background: t.surface,
+                                border: `1px solid ${t.border2}`,
+                                color: t.muted,
+                              }}
+                              className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0"
+                            >
+                              {r.name[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p
+                                style={{
+                                  color: t.text,
+                                  fontFamily: "'Lato', sans-serif",
+                                }}
+                                className="text-sm font-semibold truncate"
+                              >
+                                {r.name}
+                              </p>
+                              <p
+                                style={{
+                                  color: t.muted,
+                                  fontFamily: "'Lato', sans-serif",
+                                }}
+                                className="text-xs"
+                              >
+                                {r.phone}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                toggleActive(r);
+                                setShowInactive(false);
+                              }}
+                              style={{
+                                background: t.greenBg,
+                                border: `1px solid ${t.greenBorder}`,
+                                color: t.green,
+                                fontFamily: "'Lato', sans-serif",
+                                flexShrink: 0,
+                              }}
+                              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
+                            >
+                              Activate
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null;
+          })()}
+          {!showForm && (
+            <button
+              onClick={openNew}
+              style={{
+                background: t.accent,
+                color: "#fff",
+                fontFamily: "'Lato', sans-serif",
+              }}
+              className="text-xs font-semibold px-4 py-2.5 rounded-lg tracking-wider hover:opacity-90 active:scale-95 transition-all shadow-sm"
+            >
+              + Add Rider
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Add/Edit Form */}
@@ -1940,39 +2068,6 @@ function DeliveryPage({ t, user }) {
               />
             </div>
           </div>
-          <div className="flex items-center gap-3 mb-4">
-            <label
-              style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
-              className="text-xs font-bold tracking-widest uppercase"
-            >
-              Status
-            </label>
-            <div className="flex items-center gap-2">
-              {["Active", "Inactive"].map((s) => (
-                <button
-                  key={s}
-                  onClick={() =>
-                    setForm((p) => ({ ...p, active: s === "Active" }))
-                  }
-                  style={{
-                    background:
-                      (form.active ? "Active" : "Inactive") === s
-                        ? t.accentBg
-                        : t.surface2,
-                    border: `1px solid ${(form.active ? "Active" : "Inactive") === s ? t.accentBorder : t.border2}`,
-                    color:
-                      (form.active ? "Active" : "Inactive") === s
-                        ? t.accent
-                        : t.subtle,
-                    fontFamily: "'Lato', sans-serif",
-                  }}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
           {formErr && (
             <p
               style={{ color: t.red, fontFamily: "'Lato', sans-serif" }}
@@ -2010,7 +2105,7 @@ function DeliveryPage({ t, user }) {
         </div>
       )}
 
-      {/* Riders list */}
+      {/* Active Riders list only */}
       {loading ? (
         <p
           style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
@@ -2018,7 +2113,7 @@ function DeliveryPage({ t, user }) {
         >
           Loading riders…
         </p>
-      ) : riders.length === 0 && !showForm ? (
+      ) : riders.filter((r) => r.active).length === 0 && !showForm ? (
         <div
           style={{ background: t.surface, border: `1px solid ${t.border}` }}
           className="rounded-xl p-10 text-center"
@@ -2028,155 +2123,102 @@ function DeliveryPage({ t, user }) {
             style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
             className="text-sm"
           >
-            No riders yet. Add your first delivery rider.
+            No active riders. Add a rider or activate an inactive one.
           </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {riders.map((r) => (
-            <div
-              key={r.id}
-              style={{
-                background: t.surface,
-                border: `1px solid ${r.active ? t.border : t.border2}`,
-                opacity: r.active ? 1 : 0.65,
-              }}
-              className="rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap"
-            >
-              {/* Avatar */}
+          {riders
+            .filter((r) => r.active)
+            .map((r) => (
               <div
+                key={r.id}
                 style={{
-                  background: r.active ? t.accentBg : t.surface2,
-                  border: `1px solid ${r.active ? t.accentBorder : t.border2}`,
-                  color: r.active ? t.accent : t.muted,
+                  background: t.surface,
+                  border: `1px solid ${t.border}`,
                 }}
-                className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
+                className="rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap"
               >
-                {r.name[0].toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p
-                    style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-                    className="text-sm font-semibold"
-                  >
-                    {r.name}
-                  </p>
-                  {r.is_default && (
+                <div
+                  style={{
+                    background: t.accentBg,
+                    border: `1px solid ${t.accentBorder}`,
+                    color: t.accent,
+                  }}
+                  className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
+                >
+                  {r.name[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p
+                      style={{
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                      }}
+                      className="text-sm font-semibold"
+                    >
+                      {r.name}
+                    </p>
+                    {r.is_default && (
+                      <span
+                        style={{
+                          background: t.accentBg,
+                          color: t.accent,
+                          border: `1px solid ${t.accentBorder}`,
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                        className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      >
+                        Default
+                      </span>
+                    )}
                     <span
                       style={{
-                        background: t.accentBg,
-                        color: t.accent,
-                        border: `1px solid ${t.accentBorder}`,
+                        background: t.greenBg,
+                        color: t.green,
+                        border: `1px solid ${t.greenBorder}`,
                         fontFamily: "'Lato', sans-serif",
                       }}
                       className="text-xs font-bold px-2 py-0.5 rounded-full"
                     >
-                      Default
+                      Active
                     </span>
-                  )}
-                  <span
-                    style={{
-                      background: r.active ? t.greenBg : t.surface2,
-                      color: r.active ? t.green : t.muted,
-                      border: `1px solid ${r.active ? t.greenBorder : t.border2}`,
-                      fontFamily: "'Lato', sans-serif",
-                    }}
-                    className="text-xs font-bold px-2 py-0.5 rounded-full"
-                  >
-                    {r.active ? "Active" : "Inactive"}
-                  </span>
-                </div>
-                <p
-                  style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
-                  className="text-xs mt-0.5"
-                >
-                  {r.phone}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => toggleActive(r)}
-                  style={{
-                    color: t.subtle,
-                    border: `1px solid ${t.border2}`,
-                    fontFamily: "'Lato', sans-serif",
-                  }}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-70 transition-opacity"
-                >
-                  {r.active ? "Deactivate" : "Activate"}
-                </button>
-                <button
-                  onClick={() => openEdit(r)}
-                  style={{
-                    color: t.accent,
-                    border: `1px solid ${t.accentBorder}`,
-                    background: t.accentBg,
-                    fontFamily: "'Lato', sans-serif",
-                  }}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
-                >
-                  ✏️ Edit
-                </button>
-                {!r.is_default && (
-                  <button
-                    onClick={() => setDelConfirm(r.id)}
-                    style={{
-                      color: t.red,
-                      border: `1px solid #FECACA`,
-                      background: "#FEF2F2",
-                      fontFamily: "'Lato', sans-serif",
-                    }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
-                  >
-                    🗑️
-                  </button>
-                )}
-              </div>
-              {delConfirm === r.id && (
-                <div
-                  style={{
-                    background: "#FEF2F2",
-                    border: "1px solid #FECACA",
-                    borderRadius: 10,
-                  }}
-                  className="w-full p-3 flex items-center gap-3"
-                >
+                  </div>
                   <p
-                    style={{
-                      color: "#B83232",
-                      fontFamily: "'Lato', sans-serif",
-                    }}
-                    className="text-sm flex-1"
+                    style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
+                    className="text-xs mt-0.5"
                   >
-                    Delete {r.name}? Past orders will retain rider info.
+                    {r.phone}
                   </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setDelConfirm(null)}
+                    onClick={() => toggleActive(r)}
                     style={{
                       color: t.subtle,
                       border: `1px solid ${t.border2}`,
                       fontFamily: "'Lato', sans-serif",
                     }}
-                    className="text-xs px-3 py-1.5 rounded-lg"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-70 transition-opacity"
                   >
-                    Cancel
+                    Deactivate
                   </button>
                   <button
-                    onClick={() => deleteRider(r.id)}
+                    onClick={() => openEdit(r)}
                     style={{
-                      background: t.red,
-                      color: "#fff",
+                      color: t.accent,
+                      border: `1px solid ${t.accentBorder}`,
+                      background: t.accentBg,
                       fontFamily: "'Lato', sans-serif",
                     }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity"
                   >
-                    Delete
+                    ✏️ Edit
                   </button>
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
         </div>
       )}
 
@@ -2336,6 +2378,1565 @@ function DeliveryPage({ t, user }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Customer Flip Card ───────────────────────────────────────────────────────
+function CustomerFlipCard({ customer, onClose, t }) {
+  const [flipped, setFlipped] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    // Trigger flip to back after mount
+    const timer = setTimeout(() => setFlipped(true), 80);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleClose = () => {
+    setFlipped(false);
+    setClosing(true);
+    setTimeout(onClose, 400);
+  };
+
+  const c = customer;
+  const initials = (c.name || "?")
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || "")
+    .join("");
+
+  const avatarColors = [
+    ["#C4711A", "#f5e6d3"],
+    ["#2D7A4F", "#d4eddf"],
+    ["#6366F1", "#e0e7ff"],
+    ["#EC4899", "#fce7f3"],
+    ["#14B8A6", "#ccfbf1"],
+  ];
+  const [accentColor, bgColor] =
+    avatarColors[Math.abs((c.name || "").charCodeAt(0) || 0) % avatarColors.length];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 70,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: closing ? "rgba(0,0,0,0)" : "rgba(0,0,0,0.5)",
+        backdropFilter: closing ? "blur(0px)" : "blur(6px)",
+        transition: "background 0.4s, backdrop-filter 0.4s",
+        padding: "16px",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleClose();
+      }}
+    >
+      <style>{`
+        .cust-flip-scene {
+          width: 340px;
+          max-width: 100%;
+          height: 420px;
+          perspective: 1200px;
+        }
+        @media (max-width: 400px) {
+          .cust-flip-scene { height: 460px; }
+        }
+        .cust-flip-card {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          transform-style: preserve-3d;
+          transition: transform 0.55s cubic-bezier(0.4, 0.2, 0.2, 1);
+        }
+        .cust-flip-card.flipped {
+          transform: rotateY(180deg);
+        }
+        .cust-flip-front,
+        .cust-flip-back {
+          position: absolute;
+          inset: 0;
+          border-radius: 20px;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+          overflow: hidden;
+          box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+        }
+        .cust-flip-back {
+          transform: rotateY(180deg);
+        }
+        @keyframes custSlideUp {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .cust-stat-row {
+          animation: custSlideUp 0.35s ease forwards;
+        }
+        .cust-stat-row:nth-child(1) { animation-delay: 0.1s; opacity: 0; }
+        .cust-stat-row:nth-child(2) { animation-delay: 0.18s; opacity: 0; }
+        .cust-stat-row:nth-child(3) { animation-delay: 0.26s; opacity: 0; }
+        .cust-stat-row:nth-child(4) { animation-delay: 0.34s; opacity: 0; }
+        .cust-stat-row:nth-child(5) { animation-delay: 0.42s; opacity: 0; }
+      `}</style>
+
+      <div className="cust-flip-scene">
+        <div className={`cust-flip-card ${flipped ? "flipped" : ""}`}>
+          {/* FRONT — decorative placeholder shown briefly */}
+          <div
+            className="cust-flip-front"
+            style={{ background: bgColor, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}
+          >
+            <div
+              style={{
+                width: 80, height: 80, borderRadius: "50%",
+                background: accentColor,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 32, fontWeight: 800, color: "#fff",
+                fontFamily: "'Cormorant Garamond', serif",
+                boxShadow: `0 8px 24px ${accentColor}55`,
+              }}
+            >
+              {initials || "?"}
+            </div>
+            <p style={{ color: accentColor, fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 700 }}>
+              {c.name}
+            </p>
+          </div>
+
+          {/* BACK — full profile */}
+          <div
+            className="cust-flip-back"
+            style={{ background: t.surface, border: `1px solid ${t.border}`, display: "flex", flexDirection: "column" }}
+          >
+            {/* Header strip */}
+            <div
+              style={{
+                background: accentColor,
+                padding: "24px 24px 20px",
+                position: "relative",
+              }}
+            >
+              <button
+                onClick={handleClose}
+                style={{
+                  position: "absolute", top: 14, right: 14,
+                  background: "rgba(255,255,255,0.25)",
+                  border: "none", borderRadius: "50%",
+                  width: 28, height: 28,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700,
+                }}
+              >
+                ✕
+              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div
+                  style={{
+                    width: 56, height: 56, borderRadius: "50%",
+                    background: "rgba(255,255,255,0.25)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 22, fontWeight: 800, color: "#fff",
+                    fontFamily: "'Cormorant Garamond', serif",
+                    border: "2px solid rgba(255,255,255,0.4)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {initials || "?"}
+                </div>
+                <div>
+                  <p style={{ color: "#fff", fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 800, lineHeight: 1.2 }}>
+                    {c.name}
+                  </p>
+                  <p style={{ color: "rgba(255,255,255,0.75)", fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 2 }}>
+                    {c.phone !== "—" ? c.phone : "No phone on file"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+              {[
+                {
+                  icon: "🛒",
+                  label: "Total Orders",
+                  value: String(c.orders),
+                  color: t.accent,
+                },
+                {
+                  icon: "💰",
+                  label: "Bill Total",
+                  value: `KD ${Number(c.revenue || 0).toFixed(3)}`,
+                  color: t.green,
+                },
+                {
+                  icon: "📊",
+                  label: "Avg Order Value",
+                  value: `KD ${Number(c.avg || 0).toFixed(3)}`,
+                  color: t.text,
+                },
+                {
+                  icon: "📅",
+                  label: "Joined On",
+                  value: c.joined
+                    ? new Date(c.joined).toLocaleDateString("en-KW", { day: "numeric", month: "long", year: "numeric" })
+                    : "—",
+                  color: t.text,
+                },
+                {
+                  icon: "📡",
+                  label: "Broadcast",
+                  value: c.broadcast === true ? "Yes" : c.broadcast === false ? "No" : "—",
+                  color: c.broadcast ? t.green : t.muted,
+                  badge: true,
+                  badgeYes: c.broadcast === true,
+                },
+              ].map((row, idx) => (
+                <div
+                  key={idx}
+                  className="cust-stat-row"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "11px 0",
+                    borderBottom: idx < 4 ? `1px solid ${t.border}` : "none",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 16 }}>{row.icon}</span>
+                    <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                      {row.label}
+                    </span>
+                  </div>
+                  {row.badge ? (
+                    <span
+                      style={{
+                        background: row.badgeYes ? t.greenBg : t.surface2,
+                        border: `1px solid ${row.badgeYes ? t.greenBorder : t.border2}`,
+                        color: row.badgeYes ? t.green : t.muted,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 11, fontWeight: 700,
+                        padding: "3px 10px", borderRadius: 999,
+                      }}
+                    >
+                      {row.value}
+                    </span>
+                  ) : (
+                    <span style={{ color: row.color, fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 800 }}>
+                      {row.value}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Last order footer */}
+            {c.lastOrder && (
+              <div
+                style={{
+                  padding: "12px 24px",
+                  borderTop: `1px solid ${t.border}`,
+                  background: t.surface2,
+                  borderRadius: "0 0 20px 20px",
+                }}
+              >
+                <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, textAlign: "center" }}>
+                  Last order: {new Date(c.lastOrder).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric" })}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Customers Page ───────────────────────────────────────────────────────────
+function CustomersPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [topN, setTopN] = useState(50);
+  const [topNInput, setTopNInput] = useState("50");
+  const [sortBy, setSortBy] = useState("revenue"); // revenue | orders | joined
+  const [sortDir, setSortDir] = useState("desc"); // asc | desc
+  const [search, setSearch] = useState("");
+  const [filterMode, setFilterMode] = useState("All Customers"); // All Customers | Top Customers
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!restId) {
+      setLoading(false);
+      setErr("No restaurant linked.");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      const { data: orders, error: oErr } = await supabase
+        .from("Orders")
+        .select("id, cust_id, total_amount, status, created_at")
+        .eq("rest_id", restId)
+        .in("status", ["delivered", "accepted", "preparing", "on_the_way"]);
+      if (oErr) throw oErr;
+
+      const custMap = {};
+      (orders || []).forEach((o) => {
+        if (!custMap[o.cust_id])
+          custMap[o.cust_id] = { cust_id: o.cust_id, orders: 0, revenue: 0, lastOrder: null };
+        custMap[o.cust_id].orders++;
+        custMap[o.cust_id].revenue += Number(o.total_amount || 0);
+        const d = new Date(o.created_at);
+        if (!custMap[o.cust_id].lastOrder || d > new Date(custMap[o.cust_id].lastOrder)) {
+          custMap[o.cust_id].lastOrder = o.created_at;
+        }
+      });
+
+      const custIds = Object.keys(custMap);
+      if (custIds.length === 0) {
+        setCustomers([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data: profiles, error: pErr } = await supabase
+        .from("Customer")
+        .select("id, cust_name, ph_num, joined_on, broadcast")
+        .in("id", custIds);
+      if (pErr) throw pErr;
+
+      const profileMap = {};
+      (profiles || []).forEach((p) => { profileMap[p.id] = p; });
+
+      const list = custIds.map((cid) => {
+        const agg = custMap[cid];
+        const prof = profileMap[cid] || {};
+        return {
+          ...agg,
+          name: prof.cust_name || "—",
+          phone: prof.ph_num || "—",
+          joined: prof.joined_on || null,
+          broadcast: prof.broadcast ?? null,
+          avg: agg.orders > 0 ? agg.revenue / agg.orders : 0,
+        };
+      });
+
+      setCustomers(list);
+    } catch (e) {
+      console.error("[CustomersPage]", e);
+      setErr(e.message || "Failed to load customers.");
+    } finally {
+      setLoading(false);
+    }
+  }, [restId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const applyTopN = () => {
+    const n = parseInt(topNInput, 10);
+    if (!isNaN(n) && n > 0 && n <= 10000) setTopN(n);
+    else setTopNInput(String(topN));
+  };
+
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortBy(col); setSortDir("desc"); }
+  };
+
+  const filtered = [...customers]
+    .filter((c) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        (c.name || "").toLowerCase().includes(q) ||
+        (c.phone || "").toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => {
+      let diff = 0;
+      if (sortBy === "orders") diff = b.orders - a.orders;
+      else if (sortBy === "joined") {
+        diff = (b.joined ? new Date(b.joined).getTime() : 0) - (a.joined ? new Date(a.joined).getTime() : 0);
+      } else {
+        diff = b.revenue - a.revenue;
+      }
+      return sortDir === "desc" ? diff : -diff;
+    })
+    .slice(0, filterMode === "Top Customers" ? Math.min(topN, 50) : topN);
+
+  const SortIcon = ({ col }) => {
+    if (sortBy !== col) return <span style={{ color: t.muted, opacity: 0.4, fontSize: 10 }}>⇅</span>;
+    return <span style={{ color: t.accent, fontSize: 10 }}>{sortDir === "desc" ? "↓" : "↑"}</span>;
+  };
+
+  const fmtJoined = (d) => {
+    if (!d) return "—";
+    const date = new Date(d);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffDays < 1) return "Today";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
+    return `${Math.floor(diffDays / 365)}y ago`;
+  };
+
+  const fmtJoinedFull = (d) => {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-KW", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  };
+
+  return (
+    <div style={{ padding: "24px 20px 40px", maxWidth: 1100, fontFamily: "'Lato', sans-serif" }}>
+      <style>{`
+        .cust-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 14px; }
+        .cust-table { width: 100%; border-collapse: collapse; min-width: 640px; }
+        .cust-table thead th {
+          padding: 12px 14px;
+          text-align: left;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.07em;
+          text-transform: uppercase;
+          white-space: nowrap;
+          cursor: pointer;
+          user-select: none;
+        }
+        .cust-table thead th:hover { opacity: 0.75; }
+        .cust-table tbody tr {
+          transition: background 0.15s;
+          cursor: default;
+        }
+        .cust-table tbody tr:hover { filter: brightness(0.97); }
+        .cust-table tbody td {
+          padding: 13px 14px;
+          font-size: 13px;
+          vertical-align: middle;
+          white-space: nowrap;
+        }
+        .cust-avatar {
+          width: 34px; height: 34px; border-radius: 50%;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-weight: 800; font-size: 13px;
+          font-family: 'Cormorant Garamond', serif;
+          flex-shrink: 0;
+        }
+        .cust-detail-btn {
+          width: 28px; height: 28px; border-radius: 50%;
+          border: none; cursor: pointer;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-size: 14px;
+          transition: transform 0.18s, opacity 0.18s;
+          background: none;
+        }
+        .cust-detail-btn:hover { transform: scale(1.2); opacity: 0.8; }
+        .cust-search-wrap { position: relative; }
+        .cust-search-wrap input { padding-left: 36px !important; }
+        .cust-search-icon {
+          position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+          font-size: 14px; pointer-events: none; opacity: 0.45;
+        }
+        @media (max-width: 500px) {
+          .cust-table tbody td { padding: 11px 10px; font-size: 12px; }
+          .cust-table thead th { padding: 10px 10px; font-size: 10px; }
+        }
+      `}</style>
+
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+        <div>
+          <h1 style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: "clamp(28px, 5vw, 38px)", fontWeight: 800, margin: 0, lineHeight: 1.1 }}>
+            Customers
+          </h1>
+          <p style={{ color: t.subtle, fontSize: 13, margin: "4px 0 0", fontFamily: "'Lato', sans-serif" }}>
+            {loading
+              ? "Loading…"
+              : `${customers.length} total · showing ${filtered.length}`}
+          </p>
+        </div>
+        <button
+          onClick={load}
+          style={{
+            background: t.surface2, border: `1px solid ${t.border2}`,
+            color: t.subtle, fontFamily: "'Lato', sans-serif",
+            fontSize: 12, fontWeight: 700, padding: "8px 14px",
+            borderRadius: 10, cursor: "pointer",
+          }}
+        >
+          Refresh ↺
+        </button>
+      </div>
+
+      {err && (
+        <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#B83232", borderRadius: 10, padding: "10px 16px", fontSize: 13, marginBottom: 16 }}>
+          ⚠️ {err}
+        </div>
+      )}
+
+      {/* Controls bar */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, alignItems: "center" }}>
+        {/* Search */}
+        <div className="cust-search-wrap" style={{ flex: "1 1 200px", minWidth: 180, maxWidth: 340, position: "relative" }}>
+          <span className="cust-search-icon">🔍</span>
+          <input
+            type="text"
+            placeholder="Search customers…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: "100%", boxSizing: "border-box",
+              background: t.surface, border: `1px solid ${t.border2}`,
+              borderRadius: 10, padding: "9px 12px 9px 36px",
+              color: t.text, fontSize: 13, outline: "none",
+              fontFamily: "'Lato', sans-serif",
+            }}
+          />
+        </div>
+
+        {/* Filter mode */}
+        <select
+          value={filterMode}
+          onChange={(e) => setFilterMode(e.target.value)}
+          style={{
+            background: t.surface, border: `1px solid ${t.border2}`,
+            borderRadius: 10, padding: "9px 12px",
+            color: t.text, fontSize: 13, cursor: "pointer",
+            fontFamily: "'Lato', sans-serif", outline: "none",
+          }}
+        >
+          <option>All Customers</option>
+          <option>Top Customers</option>
+        </select>
+
+        {/* Show N */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+          <span style={{ color: t.subtle, fontSize: 12, whiteSpace: "nowrap", fontWeight: 600 }}>Show top</span>
+          <input
+            type="number" min={1} max={10000}
+            value={topNInput}
+            onChange={(e) => setTopNInput(e.target.value)}
+            onBlur={applyTopN}
+            onKeyDown={(e) => e.key === "Enter" && applyTopN()}
+            style={{
+              width: 64, background: t.surface2, border: `1px solid ${t.border2}`,
+              borderRadius: 8, padding: "7px 10px",
+              color: t.text, fontSize: 13, textAlign: "center",
+              fontFamily: "'Lato', sans-serif", fontWeight: 700, outline: "none",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, overflow: "hidden" }}>
+          {[1,2,3,4,5].map((k) => (
+            <div key={k} style={{ padding: "16px 20px", borderBottom: `1px solid ${t.border}`, display: "flex", gap: 16, alignItems: "center" }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: t.surface2, flexShrink: 0 }} className="animate-pulse" />
+              <div style={{ flex: 1 }}>
+                <div style={{ height: 13, width: "45%", background: t.surface2, borderRadius: 6, marginBottom: 6 }} className="animate-pulse" />
+                <div style={{ height: 10, width: "28%", background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+              </div>
+              <div style={{ height: 13, width: 60, background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+              <div style={{ height: 13, width: 80, background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: "60px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 48, opacity: 0.2, marginBottom: 12 }}>👥</div>
+          <p style={{ color: t.text, fontWeight: 700, fontSize: 15, margin: 0 }}>
+            {search ? "No customers match your search" : "No customers yet"}
+          </p>
+          <p style={{ color: t.muted, fontSize: 13, marginTop: 6 }}>
+            {search ? "Try a different name or phone number." : "Customers will appear once orders are placed."}
+          </p>
+        </div>
+      ) : (
+        <div className="cust-table-wrap" style={{ background: t.surface, border: `1px solid ${t.border}` }}>
+          <table className="cust-table">
+            <thead style={{ background: t.surface2, borderBottom: `2px solid ${t.border2}` }}>
+              <tr>
+                <th style={{ color: t.subtle, paddingLeft: 20 }}>#</th>
+                <th style={{ color: t.subtle }}>Customer Name</th>
+                <th style={{ color: t.subtle }}>Phone Number</th>
+                <th
+                  style={{ color: sortBy === "orders" ? t.accent : t.subtle }}
+                  onClick={() => toggleSort("orders")}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Total Orders <SortIcon col="orders" />
+                  </span>
+                </th>
+                <th
+                  style={{ color: sortBy === "revenue" ? t.accent : t.subtle }}
+                  onClick={() => toggleSort("revenue")}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Bill Total <SortIcon col="revenue" />
+                  </span>
+                </th>
+                <th style={{ color: t.subtle }}>Broadcast</th>
+                <th
+                  style={{ color: sortBy === "joined" ? t.accent : t.subtle }}
+                  onClick={() => toggleSort("joined")}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Joined On <SortIcon col="joined" />
+                  </span>
+                </th>
+                <th style={{ color: t.subtle, textAlign: "center" }}>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c, i) => {
+                const avatarColors = [
+                  ["#C4711A","#f5e6d3"],["#2D7A4F","#d4eddf"],
+                  ["#6366F1","#e0e7ff"],["#EC4899","#fce7f3"],["#14B8A6","#ccfbf1"],
+                ];
+                const [ac, bgc] = avatarColors[Math.abs((c.name||"").charCodeAt(0)||0) % avatarColors.length];
+                const isTop3 = filterMode === "Top Customers" && i < 3;
+                const medalEmoji = i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉";
+                return (
+                  <tr
+                    key={c.cust_id}
+                    style={{
+                      background: i % 2 === 0 ? t.surface : t.surface2 + "88",
+                      borderBottom: `1px solid ${t.border}`,
+                    }}
+                  >
+                    {/* Rank */}
+                    <td style={{ color: t.muted, fontWeight: 700, fontSize: 12, paddingLeft: 20, width: 48 }}>
+                      {isTop3 ? medalEmoji : `#${i + 1}`}
+                    </td>
+
+                    {/* Name + avatar */}
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div className="cust-avatar" style={{ background: bgc, color: ac, minWidth: 34 }}>
+                          {(c.name || "?").split(" ").slice(0,2).map(w => w[0]?.toUpperCase()||"").join("") || "?"}
+                        </div>
+                        <span style={{ color: t.text, fontWeight: 600, fontSize: 13 }}>
+                          {c.name}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Phone */}
+                    <td style={{ color: t.subtle }}>
+                      {c.phone !== "—" ? c.phone : <span style={{ color: t.muted, fontStyle: "italic" }}>—</span>}
+                    </td>
+
+                    {/* Orders */}
+                    <td>
+                      <span style={{
+                        color: t.accent, fontWeight: 800,
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: 16,
+                      }}>
+                        {c.orders}
+                      </span>
+                    </td>
+
+                    {/* Bill Total */}
+                    <td>
+                      <span style={{
+                        color: t.green, fontWeight: 800,
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: 15,
+                      }}>
+                        KD {Number(c.revenue || 0).toFixed(3)}
+                      </span>
+                    </td>
+
+                    {/* Broadcast */}
+                    <td>
+                      {c.broadcast === true ? (
+                        <span style={{
+                          background: t.greenBg, border: `1px solid ${t.greenBorder}`,
+                          color: t.green, borderRadius: 999, padding: "3px 10px",
+                          fontSize: 11, fontWeight: 700,
+                        }}>Yes</span>
+                      ) : c.broadcast === false ? (
+                        <span style={{
+                          background: t.surface2, border: `1px solid ${t.border2}`,
+                          color: t.muted, borderRadius: 999, padding: "3px 10px",
+                          fontSize: 11, fontWeight: 700,
+                        }}>No</span>
+                      ) : (
+                        <span style={{ color: t.muted, fontStyle: "italic" }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Joined */}
+                    <td>
+                      <div>
+                        <div style={{ color: t.text, fontWeight: 700, fontSize: 12 }}>
+                          {fmtJoined(c.joined)}
+                        </div>
+                        {c.joined && (
+                          <div style={{ color: t.muted, fontSize: 11, marginTop: 1 }}>
+                            {fmtJoinedFull(c.joined)}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Details button */}
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        className="cust-detail-btn"
+                        onClick={() => setSelectedCustomer(c)}
+                        style={{ color: t.accent, background: t.accentBg, border: `1px solid ${t.accentBorder}` }}
+                        title="View customer details"
+                      >
+                        ℹ
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Flip card overlay */}
+      {selectedCustomer && (
+        <CustomerFlipCard
+          customer={selectedCustomer}
+          onClose={() => setSelectedCustomer(null)}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Discounts Page ───────────────────────────────────────────────────────────
+/*
+  Requires two Supabase tables (run once):
+
+  CREATE TABLE public.Discounts (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rest_id       bigint NOT NULL REFERENCES public.Restaurants(id),
+    code          text NOT NULL,
+    type          text NOT NULL CHECK (type IN ('percentage','fixed')),
+    value         numeric NOT NULL,
+    min_order     numeric NOT NULL DEFAULT 0,
+    max_order     numeric,
+    avail_from    date,
+    expiry_date   date,
+    is_active     boolean NOT NULL DEFAULT true,
+    max_uses_per_customer integer NOT NULL DEFAULT 1,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (rest_id, code)
+  );
+
+  CREATE TABLE public.Discount_Redemptions (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    discount_id   bigint NOT NULL REFERENCES public.Discounts(id),
+    cust_id       bigint NOT NULL REFERENCES public.Customer(id),
+    order_id      bigint REFERENCES public.Orders(id),
+    amount_saved  numeric NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now()
+  );
+*/
+
+function DiscountsPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+
+  // ── state ──────────────────────────────────────────────────────────────────
+  const [subPlan, setSubPlan]       = useState(null);  // 'Basic' | 'Premium' etc.
+  const [discounts, setDiscounts]   = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [err, setErr]               = useState(null);
+  const [search, setSearch]         = useState("");
+
+  // modal state
+  const [modalOpen, setModalOpen]   = useState(false);
+  const [editing, setEditing]       = useState(null);  // discount obj being edited, or null = new
+  const [saving, setSaving]         = useState(false);
+  const [modalErr, setModalErr]     = useState("");
+
+  // redemptions drawer
+  const [redeemDisc, setRedeemDisc] = useState(null);  // discount to show redemptions for
+  const [redemptions, setRedemptions] = useState([]);
+  const [redeemLoading, setRedeemLoading] = useState(false);
+
+  // form fields
+  const emptyForm = {
+    code: "", type: "percentage", value: "",
+    min_order: "", max_order: "",
+    avail_from: "", expiry_date: "",
+    is_active: true, max_uses_per_customer: 1,
+  };
+  const [form, setForm] = useState(emptyForm);
+  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // ── load restaurant plan + discounts ──────────────────────────────────────
+  const load = useCallback(async () => {
+    if (!restId) { setLoading(false); setErr("No restaurant linked."); return; }
+    setLoading(true); setErr(null);
+    try {
+      // fetch sub_plan
+      const { data: rest } = await supabase
+        .from("Restaurants").select("sub_plan").eq("id", restId).maybeSingle();
+      setSubPlan(rest?.sub_plan || "Basic");
+
+      // fetch discounts + redemption stats in one go
+      const { data: rows, error: dErr } = await supabase
+        .from("Discounts")
+        .select(`
+          id, code, type, value, min_order, max_order,
+          avail_from, expiry_date, is_active, max_uses_per_customer, created_at,
+          Discount_Redemptions(id, amount_saved)
+        `)
+        .eq("rest_id", restId)
+        .order("created_at", { ascending: false });
+      if (dErr) throw dErr;
+
+      setDiscounts(rows || []);
+    } catch (e) {
+      console.error("[DiscountsPage]", e);
+      setErr(e.message || "Failed to load discounts.");
+    } finally { setLoading(false); }
+  }, [restId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── computed helpers ───────────────────────────────────────────────────────
+  const isExpired = (d) => d?.expiry_date && new Date(d.expiry_date) < new Date(new Date().toDateString());
+  const isNotStarted = (d) => d?.avail_from && new Date(d.avail_from) > new Date(new Date().toDateString());
+
+  const effectiveStatus = (d) => {
+    if (!d.is_active) return "inactive";
+    if (isExpired(d)) return "expired";
+    if (isNotStarted(d)) return "scheduled";
+    return "active";
+  };
+
+  const statusMeta = {
+    active:    { label: "Active",    bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
+    inactive:  { label: "Inactive",  bg: "#f1f5f9", color: "#64748b", border: "#e2e8f0" },
+    expired:   { label: "Expired",   bg: "#fee2e2", color: "#b91c1c", border: "#fecaca" },
+    scheduled: { label: "Scheduled", bg: "#fef9c3", color: "#92400e", border: "#fde68a" },
+  };
+
+  const discountLabel = (d) =>
+    d.type === "percentage" ? `${d.value}% off` : `KD ${Number(d.value).toFixed(3)} off`;
+
+  const filteredDiscounts = discounts.filter(d =>
+    d.code.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // aggregate stats
+  const totalStats = discounts.reduce((acc, d) => {
+    const reds = d.Discount_Redemptions || [];
+    acc.redemptions += reds.length;
+    acc.saved += reds.reduce((s, r) => s + Number(r.amount_saved || 0), 0);
+    return acc;
+  }, { redemptions: 0, saved: 0 });
+
+  // ── open/close modal ───────────────────────────────────────────────────────
+  const openNew = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setModalErr("");
+    setModalOpen(true);
+  };
+
+  const openEdit = (d) => {
+    setEditing(d);
+    setForm({
+      code: d.code,
+      type: d.type,
+      value: String(d.value),
+      min_order: d.min_order != null ? String(d.min_order) : "",
+      max_order: d.max_order != null ? String(d.max_order) : "",
+      avail_from: d.avail_from || "",
+      expiry_date: d.expiry_date || "",
+      is_active: d.is_active,
+      max_uses_per_customer: d.max_uses_per_customer ?? 1,
+    });
+    setModalErr("");
+    setModalOpen(true);
+  };
+
+  // ── validate form ──────────────────────────────────────────────────────────
+  const validate = () => {
+    const code = form.code.trim().toUpperCase();
+    if (!code) return "Discount code is required.";
+    if (!/^[A-Z0-9_-]+$/.test(code)) return "Code may only contain letters, numbers, _ and -.";
+    const val = Number(form.value);
+    if (!form.value || isNaN(val) || val <= 0) return "Discount value must be a positive number.";
+    if (form.type === "percentage" && val > 100) return "Percentage cannot exceed 100%.";
+    const minO = Number(form.min_order || 0);
+    if (isNaN(minO) || minO < 0) return "Minimum order must be 0 or more.";
+    if (form.type === "fixed" && val >= minO && minO > 0)
+      return `Min. order (KD ${minO.toFixed(3)}) must be greater than the discount value (KD ${val.toFixed(3)}).`;
+    if (form.type === "fixed" && minO === 0)
+      return "For a fixed discount, please set a minimum order value greater than the discount amount.";
+    if (form.max_order) {
+      const maxO = Number(form.max_order);
+      if (isNaN(maxO) || maxO <= 0) return "Max order must be a positive number.";
+      if (maxO <= minO) return "Max order must be greater than min order.";
+    }
+    if (form.avail_from && form.expiry_date && form.avail_from > form.expiry_date)
+      return "Available from date cannot be after expiry date.";
+    const mup = Number(form.max_uses_per_customer);
+    if (isNaN(mup) || mup < 1) return "Max uses per customer must be at least 1.";
+    return null;
+  };
+
+  // ── save ──────────────────────────────────────────────────────────────────
+  const save = async () => {
+    const validationError = validate();
+    if (validationError) { setModalErr(validationError); return; }
+    setSaving(true); setModalErr("");
+    try {
+      const payload = {
+        rest_id: restId,
+        code: form.code.trim().toUpperCase(),
+        type: form.type,
+        value: Number(form.value),
+        min_order: Number(form.min_order || 0),
+        max_order: form.max_order ? Number(form.max_order) : null,
+        avail_from: form.avail_from || null,
+        expiry_date: form.expiry_date || null,
+        is_active: form.is_active,
+        max_uses_per_customer: Number(form.max_uses_per_customer),
+      };
+      if (editing) {
+        const { error } = await supabase.from("Discounts").update(payload).eq("id", editing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("Discounts").insert(payload);
+        if (error) {
+          if (error.code === "23505") throw new Error("A discount with this code already exists for your restaurant.");
+          throw error;
+        }
+      }
+      setModalOpen(false);
+      load();
+    } catch (e) {
+      setModalErr(e.message || "Failed to save discount.");
+    } finally { setSaving(false); }
+  };
+
+  // ── toggle active (with expiry guard) ─────────────────────────────────────
+  const toggleActive = async (d) => {
+    // If trying to re-activate an expired code, block
+    if (!d.is_active && isExpired(d)) {
+      alert("This code has expired. Please edit the expiry date before re-activating.");
+      return;
+    }
+    try {
+      await supabase.from("Discounts").update({ is_active: !d.is_active }).eq("id", d.id);
+      setDiscounts(prev => prev.map(x => x.id === d.id ? { ...x, is_active: !x.is_active } : x));
+    } catch (e) {
+      alert("Failed to update status: " + e.message);
+    }
+  };
+
+  // ── delete ─────────────────────────────────────────────────────────────────
+  const deleteDiscount = async (d) => {
+    if (!window.confirm(`Delete code "${d.code}"? This cannot be undone.`)) return;
+    try {
+      await supabase.from("Discounts").delete().eq("id", d.id);
+      setDiscounts(prev => prev.filter(x => x.id !== d.id));
+    } catch (e) {
+      alert("Failed to delete: " + e.message);
+    }
+  };
+
+  // ── load redemptions ───────────────────────────────────────────────────────
+  const openRedemptions = async (d) => {
+    setRedeemDisc(d);
+    setRedeemLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("Discount_Redemptions")
+        .select("id, amount_saved, created_at, cust_id, order_id, Customer(cust_name, ph_num)")
+        .eq("discount_id", d.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setRedemptions(data || []);
+    } catch (e) {
+      setRedemptions([]);
+    } finally { setRedeemLoading(false); }
+  };
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric" }) : "—";
+
+  // ── Premium gate ──────────────────────────────────────────────────────────
+  if (!loading && subPlan === "Basic") {
+    return (
+      <div style={{ padding: "40px 24px", maxWidth: 560, margin: "0 auto", fontFamily: "'Lato', sans-serif" }}>
+        <style>{`
+          @keyframes discFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+          .disc-float { animation: discFloat 3s ease-in-out infinite; }
+        `}</style>
+        <div style={{
+          background: t.surface, border: `1px solid ${t.border}`,
+          borderRadius: 20, padding: "48px 36px", textAlign: "center",
+          boxShadow: `0 4px 24px ${t.accent}14`,
+        }}>
+          <div className="disc-float" style={{ fontSize: 64, marginBottom: 20 }}>🏷️</div>
+          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 28, fontWeight: 800, margin: "0 0 10px" }}>
+            Unlock Discount Codes
+          </h2>
+          <p style={{ color: t.subtle, fontSize: 14, lineHeight: 1.6, margin: "0 0 28px" }}>
+            Discount codes, promo campaigns, and coupon analytics are available on our
+            <strong style={{ color: t.accent }}> Premium plan</strong>.
+            Upgrade to start rewarding your customers and driving more orders.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", marginBottom: 28 }}>
+            {["Percentage & fixed discounts","Per-customer usage limits","Redemption analytics","Expiry & availability dates","Sales revenue tracking"].map(f => (
+              <span key={f} style={{
+                background: t.accentBg, border: `1px solid ${t.accentBorder}`,
+                color: t.accent, borderRadius: 999, padding: "5px 14px", fontSize: 12, fontWeight: 700,
+              }}>✓ {f}</span>
+            ))}
+          </div>
+          <a
+            href="/#pricing"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              background: t.accent, color: "#fff",
+              borderRadius: 12, padding: "14px 32px",
+              fontSize: 15, fontWeight: 700, textDecoration: "none",
+              boxShadow: `0 4px 16px ${t.accent}44`,
+              transition: "opacity .2s",
+            }}
+            onMouseOver={e => e.currentTarget.style.opacity = "0.88"}
+            onMouseOut={e => e.currentTarget.style.opacity = "1"}
+          >
+            🚀 View Pricing Plans
+          </a>
+          <p style={{ color: t.muted, fontSize: 12, marginTop: 16 }}>
+            You're currently on the <strong>Basic</strong> plan.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main UI ───────────────────────────────────────────────────────────────
+  return (
+    <div style={{ padding: "24px 20px 60px", maxWidth: 1100, fontFamily: "'Lato', sans-serif" }}>
+      <style>{`
+        .disc-table { width: 100%; border-collapse: collapse; min-width: 700px; }
+        .disc-table thead th {
+          padding: 11px 14px; text-align: left;
+          font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+          white-space: nowrap; cursor: default; user-select: none;
+        }
+        .disc-table tbody td { padding: 13px 14px; font-size: 13px; vertical-align: middle; }
+        .disc-table tbody tr { border-bottom: 1px solid; transition: background .12s; }
+        .disc-table tbody tr:last-child { border-bottom: none; }
+        .disc-toggle { position:relative; width:42px; height:23px; cursor:pointer; }
+        .disc-toggle input { opacity:0; width:0; height:0; position:absolute; }
+        .disc-toggle-track {
+          position:absolute; inset:0; border-radius:999px;
+          transition:background .25s;
+        }
+        .disc-toggle-thumb {
+          position:absolute; top:3px; left:3px;
+          width:17px; height:17px; border-radius:50%; background:#fff;
+          box-shadow:0 1px 4px rgba(0,0,0,.2);
+          transition:transform .25s;
+        }
+        .disc-toggle input:checked + .disc-toggle-track { }
+        .disc-modal-backdrop {
+          position:fixed; inset:0; z-index:60;
+          background:rgba(0,0,0,.45); backdrop-filter:blur(4px);
+          display:flex; align-items:flex-end; justify-content:center;
+        }
+        @media(min-width:560px){ .disc-modal-backdrop { align-items:center; } }
+        .disc-modal {
+          width:100%; max-width:520px; max-height:92vh;
+          border-radius:20px 20px 0 0; overflow:hidden; display:flex; flex-direction:column;
+        }
+        @media(min-width:560px){ .disc-modal { border-radius:20px; } }
+        .disc-inp {
+          width:100%; box-sizing:border-box; border-radius:10px;
+          padding:10px 14px; font-size:13.5px; outline:none; transition:border .15s;
+          font-family:'Lato',sans-serif;
+        }
+        .disc-inp:focus { box-shadow:0 0 0 3px rgba(196,113,26,.15); }
+        .disc-select {
+          width:100%; box-sizing:border-box; border-radius:10px;
+          padding:10px 14px; font-size:13.5px; outline:none;
+          font-family:'Lato',sans-serif; cursor:pointer;
+          appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+          background-repeat:no-repeat; background-position:right 12px center;
+          padding-right:36px;
+        }
+        .disc-stat-card {
+          border-radius:14px; padding:16px 20px; flex:1; min-width:130px;
+        }
+        .disc-redemption-row {
+          display:flex; align-items:flex-start; gap:12px;
+          padding:12px 0; border-bottom:1px solid;
+        }
+        .disc-redemption-row:last-child { border-bottom:none; }
+        @keyframes discSlideUp {
+          from { opacity:0; transform:translateY(20px); }
+          to   { opacity:1; transform:translateY(0); }
+        }
+        .disc-modal-anim { animation: discSlideUp .28s ease; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12, marginBottom:22 }}>
+        <div>
+          <h1 style={{ fontFamily:"'Cormorant Garamond',serif", color:t.text, fontSize:"clamp(26px,5vw,36px)", fontWeight:800, margin:0, lineHeight:1.1 }}>
+            Discount Codes
+          </h1>
+          <p style={{ color:t.subtle, fontSize:13, margin:"4px 0 0" }}>
+            {loading ? "Loading…" : `${discounts.length} code${discounts.length !== 1 ? "s" : ""}`}
+          </p>
+        </div>
+        <button
+          onClick={openNew}
+          style={{
+            background:t.accent, color:"#fff",
+            border:"none", borderRadius:12,
+            padding:"10px 20px", fontSize:13, fontWeight:700,
+            cursor:"pointer", display:"flex", alignItems:"center", gap:7,
+            boxShadow:`0 4px 14px ${t.accent}44`,
+          }}
+        >
+          + New Discount Code
+        </button>
+      </div>
+
+      {err && (
+        <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", color:"#B83232", borderRadius:10, padding:"10px 16px", fontSize:13, marginBottom:16 }}>
+          ⚠️ {err}
+        </div>
+      )}
+
+      {/* ── Summary stat cards ── */}
+      {!loading && (
+        <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:22 }}>
+          {[
+            { label:"Total Codes", value:discounts.length, icon:"🏷️", color:t.accent },
+            { label:"Active", value:discounts.filter(d=>effectiveStatus(d)==="active").length, icon:"✅", color:t.green },
+            { label:"Total Redemptions", value:totalStats.redemptions, icon:"🔄", color:"#6366f1" },
+            { label:"Total Savings Given", value:`KD ${totalStats.saved.toFixed(3)}`, icon:"💰", color:"#f59e0b" },
+          ].map(s => (
+            <div key={s.label} className="disc-stat-card" style={{ background:t.surface, border:`1px solid ${t.border}` }}>
+              <div style={{ fontSize:20, marginBottom:6 }}>{s.icon}</div>
+              <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:22, fontWeight:800, color:s.color }}>{s.value}</div>
+              <div style={{ color:t.muted, fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:".06em", marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Search bar ── */}
+      <div style={{ position:"relative", maxWidth:320, marginBottom:16 }}>
+        <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)", opacity:.4, fontSize:15, pointerEvents:"none" }}>🔍</span>
+        <input
+          type="text" placeholder="Search codes…"
+          value={search} onChange={e=>setSearch(e.target.value)}
+          style={{
+            width:"100%", boxSizing:"border-box",
+            background:t.surface, border:`1px solid ${t.border2}`,
+            borderRadius:10, padding:"9px 12px 9px 34px",
+            color:t.text, fontSize:13, outline:"none",
+            fontFamily:"'Lato',sans-serif",
+          }}
+        />
+      </div>
+
+      {/* ── Table ── */}
+      {loading ? (
+        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:14, overflow:"hidden" }}>
+          {[1,2,3].map(k=>(
+            <div key={k} style={{ padding:"16px 20px", borderBottom:`1px solid ${t.border}`, display:"flex", gap:16 }}>
+              {[140,80,100,80,70].map((w,i)=>(
+                <div key={i} style={{ height:13, width:w, background:t.surface2, borderRadius:6 }} className="animate-pulse" />
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : filteredDiscounts.length === 0 ? (
+        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:14, padding:"60px 20px", textAlign:"center" }}>
+          <div style={{ fontSize:48, opacity:.2, marginBottom:12 }}>🏷️</div>
+          <p style={{ color:t.text, fontWeight:700, fontSize:15, margin:0 }}>
+            {search ? "No codes match your search" : "No discount codes yet"}
+          </p>
+          <p style={{ color:t.muted, fontSize:13, marginTop:6 }}>
+            {search ? "Try a different search term." : "Click '+ New Discount Code' to create your first one."}
+          </p>
+        </div>
+      ) : (
+        <div style={{ overflowX:"auto", borderRadius:14, border:`1px solid ${t.border}`, background:t.surface }}>
+          <table className="disc-table">
+            <thead style={{ background:t.surface2, borderBottom:`2px solid ${t.border2}` }}>
+              <tr>
+                {["Code","Type","Value","Min Order","Max Order","Availability","Expiry","Status","Uses/Cust","Redemptions","Sales","Actions"].map(h=>(
+                  <th key={h} style={{ color:t.subtle }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDiscounts.map((d, i) => {
+                const status = effectiveStatus(d);
+                const sm = statusMeta[status];
+                const reds = d.Discount_Redemptions || [];
+                const totalSaved = reds.reduce((s,r) => s+Number(r.amount_saved||0), 0);
+                return (
+                  <tr key={d.id} style={{
+                    background: i%2===0 ? t.surface : t.surface2+"88",
+                    borderBottomColor: t.border,
+                  }}>
+                    {/* Code */}
+                    <td>
+                      <span style={{
+                        fontFamily:"'Cormorant Garamond',serif",
+                        fontWeight:800, fontSize:16, color:t.text,
+                        letterSpacing:".04em",
+                      }}>{d.code}</span>
+                    </td>
+                    {/* Type */}
+                    <td>
+                      <span style={{
+                        background: d.type==="percentage" ? "#ede9fe" : "#dcfce7",
+                        color: d.type==="percentage" ? "#6d28d9" : "#15803d",
+                        border: `1px solid ${d.type==="percentage"?"#ddd6fe":"#bbf7d0"}`,
+                        borderRadius:999, padding:"3px 10px", fontSize:11, fontWeight:700,
+                      }}>
+                        {d.type==="percentage" ? "%" : "KD"} {d.type==="percentage" ? "Percent" : "Fixed"}
+                      </span>
+                    </td>
+                    {/* Value */}
+                    <td style={{ color:t.accent, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:16 }}>
+                      {discountLabel(d)}
+                    </td>
+                    {/* Min Order */}
+                    <td style={{ color:t.subtle, fontSize:12 }}>
+                      {d.min_order ? `KD ${Number(d.min_order).toFixed(3)}` : "—"}
+                    </td>
+                    {/* Max Order */}
+                    <td style={{ color:t.subtle, fontSize:12 }}>
+                      {d.max_order ? `KD ${Number(d.max_order).toFixed(3)}` : "—"}
+                    </td>
+                    {/* Availability */}
+                    <td style={{ color:t.subtle, fontSize:12, whiteSpace:"nowrap" }}>
+                      {d.avail_from ? fmtDate(d.avail_from) : "Immediately"}
+                    </td>
+                    {/* Expiry */}
+                    <td style={{ fontSize:12, whiteSpace:"nowrap" }}>
+                      {d.expiry_date ? (
+                        <span style={{ color: isExpired(d) ? "#b91c1c" : t.text, fontWeight: isExpired(d) ? 700 : 400 }}>
+                          {isExpired(d) ? "⚠ " : ""}{fmtDate(d.expiry_date)}
+                        </span>
+                      ) : <span style={{ color:t.muted }}>Never</span>}
+                    </td>
+                    {/* Status toggle */}
+                    <td>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <label className="disc-toggle" title={isExpired(d) && !d.is_active ? "Edit expiry date first" : ""}>
+                          <input type="checkbox" checked={d.is_active} onChange={()=>toggleActive(d)} />
+                          <div className="disc-toggle-track" style={{ background: d.is_active ? t.accent : t.toggleOff }} />
+                          <div className="disc-toggle-thumb" style={{ transform: d.is_active ? "translateX(19px)" : "translateX(0)" }} />
+                        </label>
+                        <span style={{
+                          background:sm.bg, color:sm.color,
+                          border:`1px solid ${sm.border}`,
+                          borderRadius:999, padding:"2px 9px", fontSize:10, fontWeight:700, whiteSpace:"nowrap",
+                        }}>{sm.label}</span>
+                      </div>
+                    </td>
+                    {/* Max uses per customer */}
+                    <td style={{ color:t.text, fontWeight:700, textAlign:"center" }}>
+                      {d.max_uses_per_customer}
+                    </td>
+                    {/* Redemptions */}
+                    <td>
+                      <button
+                        onClick={() => openRedemptions(d)}
+                        style={{
+                          background:t.accentBg, border:`1px solid ${t.accentBorder}`,
+                          color:t.accent, borderRadius:8, padding:"5px 10px",
+                          fontSize:12, fontWeight:700, cursor:"pointer",
+                          fontFamily:"'Lato',sans-serif",
+                        }}
+                      >
+                        {reds.length} uses
+                      </button>
+                    </td>
+                    {/* Sales */}
+                    <td style={{ color:t.green, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:15 }}>
+                      KD {totalSaved.toFixed(3)}
+                    </td>
+                    {/* Actions */}
+                    <td>
+                      <div style={{ display:"flex", gap:6 }}>
+                        <button
+                          onClick={() => openEdit(d)}
+                          style={{
+                            background:t.surface2, border:`1px solid ${t.border2}`,
+                            borderRadius:8, width:30, height:30, cursor:"pointer",
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            color:t.subtle, fontSize:14,
+                          }}
+                          title="Edit"
+                        >✏️</button>
+                        <button
+                          onClick={() => deleteDiscount(d)}
+                          style={{
+                            background:"#fef2f2", border:"1px solid #fecaca",
+                            borderRadius:8, width:30, height:30, cursor:"pointer",
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            color:"#b91c1c", fontSize:14,
+                          }}
+                          title="Delete"
+                        >🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Create/Edit Modal ── */}
+      {modalOpen && (
+        <div className="disc-modal-backdrop" onClick={e => { if(e.target===e.currentTarget) setModalOpen(false); }}>
+          <div className="disc-modal disc-modal-anim" style={{ background:t.surface, border:`1px solid ${t.border}` }}>
+            {/* Header */}
+            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${t.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+              <h2 style={{ fontFamily:"'Cormorant Garamond',serif", color:t.text, fontSize:22, fontWeight:800, margin:0 }}>
+                {editing ? "Edit Discount Code" : "New Discount Code"}
+              </h2>
+              <button onClick={()=>setModalOpen(false)} style={{ background:t.surface2, border:`1px solid ${t.border2}`, borderRadius:"50%", width:32, height:32, cursor:"pointer", color:t.subtle, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding:"20px 24px", overflowY:"auto", flex:1 }}>
+              {modalErr && (
+                <div style={{ background:"#fef2f2", border:"1px solid #fecaca", color:"#b91c1c", borderRadius:10, padding:"10px 14px", fontSize:13, marginBottom:16, fontWeight:500 }}>
+                  ⚠️ {modalErr}
+                </div>
+              )}
+
+              {/* Code */}
+              <div style={{ marginBottom:16 }}>
+                <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Discount Code *</label>
+                <input
+                  className="disc-inp"
+                  placeholder="e.g. SAVE20 or WELCOME"
+                  value={form.code}
+                  onChange={e => setF("code", e.target.value.toUpperCase())}
+                  style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, fontSize:16, letterSpacing:".06em" }}
+                />
+              </div>
+
+              {/* Type + Value side by side */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+                <div>
+                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Discount Type *</label>
+                  <select
+                    className="disc-select"
+                    value={form.type}
+                    onChange={e => setF("type", e.target.value)}
+                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount (KD)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>
+                    Value * {form.type==="percentage" ? "(e.g. 20 for 20%)" : "(e.g. 1.500 for KD 1.500)"}
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="number" min="0" step={form.type==="percentage"?"1":"0.001"}
+                    placeholder={form.type==="percentage" ? "20" : "1.500"}
+                    value={form.value}
+                    onChange={e => setF("value", e.target.value)}
+                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                  />
+                </div>
+              </div>
+
+              {/* Min / Max order */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+                <div>
+                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>
+                    Min. Order (KD) *
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="number" min="0" step="0.001"
+                    placeholder="e.g. 3.000"
+                    value={form.min_order}
+                    onChange={e => setF("min_order", e.target.value)}
+                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Max. Order (KD) <span style={{ textTransform:"none", fontWeight:400, color:t.muted }}>optional</span></label>
+                  <input
+                    className="disc-inp"
+                    type="number" min="0" step="0.001"
+                    placeholder="Leave blank for no max"
+                    value={form.max_order}
+                    onChange={e => setF("max_order", e.target.value)}
+                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                  />
+                </div>
+              </div>
+
+              {/* Avail from / Expiry */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+                <div>
+                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Available From <span style={{ textTransform:"none", fontWeight:400, color:t.muted }}>optional</span></label>
+                  <input
+                    className="disc-inp" type="date"
+                    value={form.avail_from}
+                    onChange={e => setF("avail_from", e.target.value)}
+                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Expiry Date <span style={{ textTransform:"none", fontWeight:400, color:t.muted }}>optional</span></label>
+                  <input
+                    className="disc-inp" type="date"
+                    value={form.expiry_date}
+                    onChange={e => setF("expiry_date", e.target.value)}
+                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                  />
+                </div>
+              </div>
+
+              {/* Max uses per customer */}
+              <div style={{ marginBottom:16 }}>
+                <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Max Uses Per Customer *</label>
+                <input
+                  className="disc-inp" type="number" min="1" step="1"
+                  placeholder="1"
+                  value={form.max_uses_per_customer}
+                  onChange={e => setF("max_uses_per_customer", e.target.value)}
+                  style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text, maxWidth:120 }}
+                />
+                <p style={{ color:t.muted, fontSize:11, marginTop:5 }}>
+                  Each customer can use this code this many times. Set to 1 for single-use per customer.
+                </p>
+              </div>
+
+              {/* Active toggle */}
+              <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", background:t.surface2, borderRadius:12, border:`1px solid ${t.border}` }}>
+                <div style={{ flex:1 }}>
+                  <p style={{ color:t.text, fontWeight:700, fontSize:13, margin:0 }}>Active</p>
+                  <p style={{ color:t.muted, fontSize:11, margin:"3px 0 0" }}>Customers can use this code when active.</p>
+                </div>
+                <label className="disc-toggle">
+                  <input type="checkbox" checked={form.is_active} onChange={e => setF("is_active", e.target.checked)} />
+                  <div className="disc-toggle-track" style={{ background: form.is_active ? t.accent : t.toggleOff }} />
+                  <div className="disc-toggle-thumb" style={{ transform: form.is_active ? "translateX(19px)" : "translateX(0)" }} />
+                </label>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding:"16px 24px", borderTop:`1px solid ${t.border}`, display:"flex", gap:10, flexShrink:0 }}>
+              <button
+                onClick={()=>setModalOpen(false)}
+                style={{ flex:1, background:t.surface2, border:`1px solid ${t.border2}`, borderRadius:12, padding:"12px", fontSize:14, fontWeight:700, color:t.subtle, cursor:"pointer", fontFamily:"'Lato',sans-serif" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save} disabled={saving}
+                style={{ flex:2, background:t.accent, border:"none", borderRadius:12, padding:"12px", fontSize:14, fontWeight:700, color:"#fff", cursor:saving?"not-allowed":"pointer", opacity:saving?.7:1, fontFamily:"'Lato',sans-serif" }}
+              >
+                {saving ? "Saving…" : editing ? "Save Changes" : "Create Code"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Redemptions Drawer ── */}
+      {redeemDisc && (
+        <div className="disc-modal-backdrop" onClick={e => { if(e.target===e.currentTarget) setRedeemDisc(null); }}>
+          <div className="disc-modal disc-modal-anim" style={{ background:t.surface, border:`1px solid ${t.border}` }}>
+            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${t.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+              <div>
+                <h2 style={{ fontFamily:"'Cormorant Garamond',serif", color:t.text, fontSize:20, fontWeight:800, margin:"0 0 2px" }}>
+                  Redemptions — <span style={{ color:t.accent }}>{redeemDisc.code}</span>
+                </h2>
+                <p style={{ color:t.muted, fontSize:12, margin:0 }}>
+                  {discountLabel(redeemDisc)} · max {redeemDisc.max_uses_per_customer} use{redeemDisc.max_uses_per_customer!==1?"s":""}/customer
+                </p>
+              </div>
+              <button onClick={()=>setRedeemDisc(null)} style={{ background:t.surface2, border:`1px solid ${t.border2}`, borderRadius:"50%", width:32, height:32, cursor:"pointer", color:t.subtle, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+            </div>
+            <div style={{ padding:"16px 24px", overflowY:"auto", flex:1 }}>
+              {redeemLoading ? (
+                <div style={{ textAlign:"center", padding:"32px 0", color:t.muted }}>Loading…</div>
+              ) : redemptions.length === 0 ? (
+                <div style={{ textAlign:"center", padding:"40px 0" }}>
+                  <div style={{ fontSize:40, opacity:.2, marginBottom:10 }}>🔄</div>
+                  <p style={{ color:t.muted, fontSize:14 }}>No redemptions yet for this code.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display:"flex", gap:12, marginBottom:18, flexWrap:"wrap" }}>
+                    <div style={{ background:t.accentBg, border:`1px solid ${t.accentBorder}`, borderRadius:10, padding:"10px 16px" }}>
+                      <div style={{ color:t.accent, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:20 }}>{redemptions.length}</div>
+                      <div style={{ color:t.muted, fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Total Uses</div>
+                    </div>
+                    <div style={{ background:t.greenBg, border:`1px solid ${t.greenBorder}`, borderRadius:10, padding:"10px 16px" }}>
+                      <div style={{ color:t.green, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:20 }}>
+                        KD {redemptions.reduce((s,r)=>s+Number(r.amount_saved||0),0).toFixed(3)}
+                      </div>
+                      <div style={{ color:t.muted, fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Total Saved</div>
+                    </div>
+                  </div>
+                  {redemptions.map((r, i) => (
+                    <div key={r.id} className="disc-redemption-row" style={{ borderBottomColor:t.border }}>
+                      <div style={{
+                        width:36, height:36, borderRadius:"50%", flexShrink:0,
+                        background:t.accentBg, border:`1px solid ${t.accentBorder}`,
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        color:t.accent, fontWeight:800, fontSize:13,
+                        fontFamily:"'Cormorant Garamond',serif",
+                      }}>
+                        {((r.Customer?.cust_name || "?")[0]).toUpperCase()}
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ color:t.text, fontWeight:700, fontSize:13, margin:"0 0 2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {r.Customer?.cust_name || "Unknown Customer"}
+                        </p>
+                        <p style={{ color:t.muted, fontSize:11, margin:0 }}>
+                          {r.Customer?.ph_num || ""} · Order #{r.order_id || "—"} · {fmtDate(r.created_at)}
+                        </p>
+                      </div>
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ color:t.green, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:15 }}>
+                          −KD {Number(r.amount_saved||0).toFixed(3)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -7617,8 +9218,12 @@ export default function Dashboard({ user, onLogout }) {
         return <OrdersPage t={t} user={user} />;
       case "delivery":
         return <DeliveryPage t={t} user={user} />;
+      case "customers":
+        return <CustomersPage t={t} user={user} />;
       case "menu":
         return <MenuPage t={t} user={user} />;
+      case "discounts":
+        return <DiscountsPage t={t} user={user} />;
       default:
         return (
           <div className="p-8 flex items-center justify-center min-h-[50vh]">
