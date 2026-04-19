@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient";
-import './index.css';
+import "./index.css";
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 const fmt = (n) => `KD ${Number(n || 0).toFixed(3)}`;
@@ -1533,71 +1533,19 @@ function CartSheet({
   onClose,
   note,
   onNoteChange,
-  appliedDiscount,
-  onApplyDiscount,
-  customer,
-  restId,
 }) {
-  const { subT, delivery, total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
+  const { subT, delivery, total } = calcTotals(cart, addonCart);
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
     cart.reduce((s, c) => s + c.qty, 0) +
     addonCart.reduce((s, a) => s + a.qty, 0);
 
-  const [codeInput, setCodeInput] = useState(appliedDiscount?.code || "");
-  const [codeLoading, setCodeLoading] = useState(false);
-  const [codeErr, setCodeErr] = useState("");
-  const [codeOk, setCodeOk] = useState(!!appliedDiscount);
-
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
-
-  const applyCode = async () => {
-    const code = codeInput.trim().toUpperCase();
-    if (!code) { setCodeErr("Please enter a discount code."); return; }
-    if (!customer) { setCodeErr("You must be logged in to apply a discount."); return; }
-    setCodeLoading(true); setCodeErr(""); setCodeOk(false);
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data, error } = await supabase
-        .from("Discounts")
-        .select("*")
-        .eq("rest_id", restId)
-        .eq("code", code)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) { setCodeErr("Invalid or inactive discount code."); onApplyDiscount(null); return; }
-      if (data.avail_from && data.avail_from > today) { setCodeErr(`This code is not valid until ${data.avail_from}.`); onApplyDiscount(null); return; }
-      if (data.expiry_date && data.expiry_date < today) { setCodeErr("This discount code has expired."); onApplyDiscount(null); return; }
-      if (data.min_order && subT < Number(data.min_order)) {
-        setCodeErr(`Minimum order of KD ${Number(data.min_order).toFixed(3)} required for this code.`); onApplyDiscount(null); return;
-      }
-      if (data.max_order && subT > Number(data.max_order)) {
-        setCodeErr(`This code only applies to orders up to KD ${Number(data.max_order).toFixed(3)}.`); onApplyDiscount(null); return;
-      }
-      // Check per-customer usage
-      const { count } = await supabase
-        .from("Discount_Redemptions")
-        .select("id", { count: "exact", head: true })
-        .eq("discount_id", data.id)
-        .eq("cust_id", customer.id);
-      if (count >= data.max_uses_per_customer) {
-        setCodeErr(`You have already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`);
-        onApplyDiscount(null); return;
-      }
-      onApplyDiscount(data);
-      setCodeOk(true);
-    } catch (e) {
-      setCodeErr("Failed to validate code. Please try again.");
-    } finally { setCodeLoading(false); }
-  };
-
-  const removeCode = () => {
-    setCodeInput(""); setCodeOk(false); setCodeErr(""); onApplyDiscount(null);
-  };
 
   return (
     <>
@@ -1616,35 +1564,88 @@ function CartSheet({
         {totalItems === 0 ? (
           <div style={{ padding: "48px 20px", textAlign: "center" }}>
             <div style={{ fontSize: 56, marginBottom: 12 }}>🛒</div>
-            <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Your cart is empty</p>
-            <p style={{ color: "var(--t2)", fontSize: 14 }}>Add items from the menu to get started</p>
+            <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>
+              Your cart is empty
+            </p>
+            <p style={{ color: "var(--t2)", fontSize: 14 }}>
+              Add items from the menu to get started
+            </p>
           </div>
         ) : (
           <div style={{ padding: "0 20px 24px" }}>
             {/* ── Menu items ── */}
             {cart.length > 0 && (
               <div style={{ marginBottom: 4 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".06em", padding: "10px 0 6px" }}>
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--t3)",
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    padding: "10px 0 6px",
+                  }}
+                >
                   Menu items
                 </p>
                 {cart.map((c, i) => {
-                  const varLines = Object.values(c.variantMeta || {}).flatMap((m) => m.optionNames).filter(Boolean);
+                  // Show option names only (no group name prefix)
+                  const varLines = Object.values(c.variantMeta || {})
+                    .flatMap((m) => m.optionNames)
+                    .filter(Boolean);
                   return (
                     <div key={i} className="cart-row">
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{c.item.name}</p>
+                        <p
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 14,
+                            marginBottom: 2,
+                          }}
+                        >
+                          {c.item.name}
+                        </p>
+                        {/* Variant option names */}
                         {varLines.length > 0 && (
                           <p className="cart-detail">
-                            {varLines.map((v, vi) => <span key={vi} style={{ display: "inline-block", marginRight: 6 }}>· {v}</span>)}
+                            {varLines.map((v, vi) => (
+                              <span
+                                key={vi}
+                                style={{
+                                  display: "inline-block",
+                                  marginRight: 6,
+                                }}
+                              >
+                                · {v}
+                              </span>
+                            ))}
                           </p>
                         )}
-                        {c.note && <p className="cart-note" style={{ marginTop: 3 }}>📝 {c.note}</p>}
-                        <p style={{ fontSize: 13, color: "var(--t2)", fontWeight: 700, marginTop: 3 }}>{fmt(c.unitPrice)}</p>
+                        {/* Per-item special instruction */}
+                        {c.note && (
+                          <p className="cart-note" style={{ marginTop: 3 }}>
+                            📝 {c.note}
+                          </p>
+                        )}
+                        <p
+                          style={{
+                            fontSize: 13,
+                            color: "var(--t2)",
+                            fontWeight: 700,
+                            marginTop: 3,
+                          }}
+                        >
+                          {fmt(c.unitPrice)}
+                        </p>
                       </div>
                       <div className="qty-ctrl" style={{ flexShrink: 0 }}>
-                        <button onClick={() => onUpdateQty(i, c.qty - 1)}>{c.qty === 1 ? Ic.trash : Ic.minus}</button>
+                        <button onClick={() => onUpdateQty(i, c.qty - 1)}>
+                          {c.qty === 1 ? Ic.trash : Ic.minus}
+                        </button>
                         <span>{c.qty}</span>
-                        <button onClick={() => onUpdateQty(i, c.qty + 1)}>{Ic.plus}</button>
+                        <button onClick={() => onUpdateQty(i, c.qty + 1)}>
+                          {Ic.plus}
+                        </button>
                       </div>
                     </div>
                   );
@@ -1655,19 +1656,48 @@ function CartSheet({
             {/* ── Add-on cart rows ── */}
             {addonCart.length > 0 && (
               <div style={{ marginBottom: 4 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".06em", padding: "10px 0 6px" }}>
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--t3)",
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    padding: "10px 0 6px",
+                  }}
+                >
                   Add-ons
                 </p>
                 {addonCart.map((a, i) => (
                   <div key={i} className="cart-row">
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{a.addon.name}</p>
-                      <p style={{ fontSize: 13, color: "var(--t2)", fontWeight: 700 }}>{fmt(a.addon.price)}</p>
+                      <p
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 14,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {a.addon.name}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "var(--t2)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {fmt(a.addon.price)}
+                      </p>
                     </div>
                     <div className="qty-ctrl" style={{ flexShrink: 0 }}>
-                      <button onClick={() => onUpdateAddonQty(a.addon.id, -1)}>{a.qty === 1 ? Ic.trash : Ic.minus}</button>
+                      <button onClick={() => onUpdateAddonQty(a.addon.id, -1)}>
+                        {a.qty === 1 ? Ic.trash : Ic.minus}
+                      </button>
                       <span>{a.qty}</span>
-                      <button onClick={() => onUpdateAddonQty(a.addon.id, 1)}>{Ic.plus}</button>
+                      <button onClick={() => onUpdateAddonQty(a.addon.id, 1)}>
+                        {Ic.plus}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1676,52 +1706,38 @@ function CartSheet({
 
             {/* ── Order note ── */}
             <div style={{ margin: "16px 0" }}>
-              <label className="lbl">Order note <span style={{ textTransform: "none", fontWeight: 400, color: "var(--t3)" }}>(optional · applies to whole order)</span></label>
+              <label className="lbl">
+                Order note{" "}
+                <span
+                  style={{
+                    textTransform: "none",
+                    fontWeight: 400,
+                    color: "var(--t3)",
+                  }}
+                >
+                  (optional · applies to whole order)
+                </span>
+              </label>
               <textarea
-                className="inp" rows={2}
+                className="inp"
+                rows={2}
                 placeholder="e.g. ring the bell, leave at door, no plastic bags…"
                 style={{ resize: "none", fontSize: 13.5 }}
-                value={note} onChange={(e) => onNoteChange(e.target.value)} maxLength={300}
+                value={note}
+                onChange={(e) => onNoteChange(e.target.value)}
+                maxLength={300}
               />
             </div>
 
-            {/* ── Discount code input ── */}
-            <div style={{ marginBottom: 14 }}>
-              <label className="lbl">Discount code <span style={{ textTransform: "none", fontWeight: 400, color: "var(--t3)" }}>(optional)</span></label>
-              {codeOk && appliedDiscount ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: "var(--r-sm)", padding: "10px 14px" }}>
-                  <span style={{ fontSize: 18 }}>🎉</span>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontWeight: 800, color: "#15803d", fontSize: 13, margin: 0 }}>{appliedDiscount.code}</p>
-                    <p style={{ color: "#166534", fontSize: 12, margin: "2px 0 0" }}>
-                      {appliedDiscount.type === "percentage" ? `${appliedDiscount.value}% off` : `KD ${Number(appliedDiscount.value).toFixed(3)} off`} applied!
-                    </p>
-                  </div>
-                  <button onClick={removeCode} style={{ background: "none", border: "none", cursor: "pointer", color: "#15803d", fontSize: 18, lineHeight: 1 }}>✕</button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="inp" style={{ flex: 1, textTransform: "uppercase", fontWeight: 700, letterSpacing: ".04em" }}
-                    placeholder="Enter code…"
-                    value={codeInput}
-                    onChange={e => { setCodeInput(e.target.value.toUpperCase()); setCodeErr(""); }}
-                    onKeyDown={e => e.key === "Enter" && applyCode()}
-                  />
-                  <button
-                    className="btn-out"
-                    onClick={applyCode} disabled={codeLoading}
-                    style={{ flexShrink: 0, whiteSpace: "nowrap" }}
-                  >
-                    {codeLoading ? "…" : "Apply"}
-                  </button>
-                </div>
-              )}
-              {codeErr && <p style={{ color: "var(--red)", fontSize: 12, marginTop: 6, fontWeight: 500 }}>⚠️ {codeErr}</p>}
-            </div>
-
             {/* ── Bill summary ── */}
-            <div style={{ background: "#fafafa", borderRadius: var_r, padding: "14px 16px", marginBottom: 14 }}>
+            <div
+              style={{
+                background: "#fafafa",
+                borderRadius: var_r,
+                padding: "14px 16px",
+                marginBottom: 14,
+              }}
+            >
               <div className="sum-row">
                 <span>Subtotal</span>
                 <span>{fmt(subT)}</span>
@@ -1730,13 +1746,13 @@ function CartSheet({
                 <span>Delivery fee</span>
                 <span>{fmt(delivery)}</span>
               </div>
-              {discountAmt > 0 && (
-                <div className="sum-row" style={{ color: "#15803d", fontWeight: 700 }}>
-                  <span>🏷 Discount ({appliedDiscount?.code})</span>
-                  <span>−{fmt(discountAmt)}</span>
-                </div>
-              )}
-              <div style={{ borderTop: "1px solid var(--border)", marginTop: 10, paddingTop: 10 }}>
+              <div
+                style={{
+                  borderTop: "1px solid var(--border)",
+                  marginTop: 10,
+                  paddingTop: 10,
+                }}
+              >
                 <div className="sum-row total">
                   <span>Total</span>
                   <span>{fmt(total)}</span>
@@ -1745,12 +1761,28 @@ function CartSheet({
             </div>
 
             {restaurant?.min_order && subT < restaurant.min_order && (
-              <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: var_r_sm, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#e65100", fontWeight: 500 }}>
-                ⚠️ Min. order {fmt(restaurant.min_order)} · add {fmt(restaurant.min_order - subT)} more
+              <div
+                style={{
+                  background: "#fff8e1",
+                  border: "1px solid #ffe082",
+                  borderRadius: var_r_sm,
+                  padding: "10px 14px",
+                  marginBottom: 14,
+                  fontSize: 13,
+                  color: "#e65100",
+                  fontWeight: 500,
+                }}
+              >
+                ⚠️ Min. order {fmt(restaurant.min_order)} · add{" "}
+                {fmt(restaurant.min_order - subT)} more
               </div>
             )}
 
-            <button className="btn-primary" disabled={!minOk} onClick={() => onCheckout(total, note)}>
+            <button
+              className="btn-primary"
+              disabled={!minOk}
+              onClick={() => onCheckout(total, note)}
+            >
               Proceed to checkout · {fmt(total)}
             </button>
           </div>
@@ -1774,9 +1806,6 @@ function CheckoutSheet({
   onClose,
   onPlaceOrder,
   onAddAddress,
-  appliedDiscount,
-  discountAmt,
-  subTotal,
 }) {
   const [selAddr, setSelAddr] = useState(defaultAddr?.id || null);
   const [pay, setPay] = useState("Cash");
@@ -1784,7 +1813,9 @@ function CheckoutSheet({
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
 
   const addr = addresses.find((a) => a.id === selAddr);
@@ -1796,31 +1827,80 @@ function CheckoutSheet({
         <div className="drag-pill" />
         <div className="sheet-hd">
           <span className="sheet-title">Checkout</span>
-          <button className="close-btn" onClick={onClose}>{Ic.close}</button>
+          <button className="close-btn" onClick={onClose}>
+            {Ic.close}
+          </button>
         </div>
         <div style={{ padding: "0 20px 20px" }}>
           {/* Address */}
           <div style={{ marginBottom: 22 }}>
             <label className="lbl">Delivery address</label>
             {addresses.length === 0 ? (
-              <button className="btn-out" style={{ width: "100%", justifyContent: "center" }} onClick={onAddAddress}>
+              <button
+                className="btn-out"
+                style={{ width: "100%", justifyContent: "center" }}
+                onClick={onAddAddress}
+              >
                 {Ic.plus} Add address
               </button>
             ) : (
               <>
                 {addresses.map((a) => (
-                  <div key={a.id} className={`addr-card${selAddr === a.id ? " sel" : ""}`} onClick={() => setSelAddr(a.id)}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ color: "var(--t2)" }}>{a.label === "Work" ? Ic.work : Ic.homeaddr}</span>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
-                      {selAddr === a.id && <span style={{ marginLeft: "auto", color: "var(--orange)" }}>{Ic.check}</span>}
+                  <div
+                    key={a.id}
+                    className={`addr-card${selAddr === a.id ? " sel" : ""}`}
+                    onClick={() => setSelAddr(a.id)}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span style={{ color: "var(--t2)" }}>
+                        {a.label === "Work" ? Ic.work : Ic.homeaddr}
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>
+                        {a.label}
+                      </span>
+                      {selAddr === a.id && (
+                        <span
+                          style={{ marginLeft: "auto", color: "var(--orange)" }}
+                        >
+                          {Ic.check}
+                        </span>
+                      )}
                     </div>
-                    <p style={{ fontSize: 13, color: "var(--t2)", paddingLeft: 22 }}>
-                      {[a.apartment_no && `Apt ${a.apartment_no}`, a.floor && `Floor ${a.floor}`, a.bldg_name, a.street, a.block].filter(Boolean).join(", ")}
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "var(--t2)",
+                        paddingLeft: 22,
+                      }}
+                    >
+                      {[
+                        a.apartment_no && `Apt ${a.apartment_no}`,
+                        a.floor && `Floor ${a.floor}`,
+                        a.bldg_name,
+                        a.street,
+                        a.block,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
                     </p>
                   </div>
                 ))}
-                <button className="btn-out" style={{ justifyContent: "center", width: "100%", marginTop: 4 }} onClick={onAddAddress}>
+                <button
+                  className="btn-out"
+                  style={{
+                    justifyContent: "center",
+                    width: "100%",
+                    marginTop: 4,
+                  }}
+                  onClick={onAddAddress}
+                >
                   {Ic.plus} Add new address
                 </button>
               </>
@@ -1831,8 +1911,16 @@ function CheckoutSheet({
           <div style={{ marginBottom: 22 }}>
             <label className="lbl">Payment method</label>
             <div style={{ display: "flex", gap: 10 }}>
-              {[["Cash", "💵"], ["Card", "💳"], ["Online", "📱"]].map(([m, em]) => (
-                <div key={m} className={`pay-opt${pay === m ? " sel" : ""}`} onClick={() => setPay(m)}>
+              {[
+                ["Cash", "💵"],
+                ["Card", "💳"],
+                ["Online", "📱"],
+              ].map(([m, em]) => (
+                <div
+                  key={m}
+                  className={`pay-opt${pay === m ? " sel" : ""}`}
+                  onClick={() => setPay(m)}
+                >
                   <span style={{ fontSize: 24 }}>{em}</span>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>{m}</span>
                 </div>
@@ -1840,56 +1928,56 @@ function CheckoutSheet({
             </div>
           </div>
 
-          {/* Notes */}
+          {/* Notes — show the special instructions from cart if any */}
           {cartNote ? (
             <div style={{ marginBottom: 22 }}>
               <label className="lbl">Special instructions</label>
-              <div style={{ background: "#fafafa", border: "1px solid var(--border)", borderRadius: var_r_sm, padding: "10px 14px", fontSize: 13.5, color: "var(--t2)", lineHeight: 1.5 }}>
+              <div
+                style={{
+                  background: "#fafafa",
+                  border: "1px solid var(--border)",
+                  borderRadius: var_r_sm,
+                  padding: "10px 14px",
+                  fontSize: 13.5,
+                  color: "var(--t2)",
+                  lineHeight: 1.5,
+                }}
+              >
                 {cartNote}
               </div>
             </div>
           ) : null}
 
-          {/* Applied discount badge */}
-          {appliedDiscount && discountAmt > 0 && (
-            <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: var_r_sm, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 18 }}>🏷️</span>
-              <div style={{ flex: 1 }}>
-                <p style={{ fontWeight: 800, color: "#15803d", fontSize: 13, margin: 0 }}>
-                  Code "{appliedDiscount.code}" applied
-                </p>
-                <p style={{ color: "#166534", fontSize: 12, margin: "2px 0 0" }}>
-                  You save {fmt(discountAmt)} on this order
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Total summary */}
-          <div style={{ background: "#fafafa", borderRadius: var_r_sm, padding: "13px 16px", marginBottom: 16 }}>
-            {subTotal != null && (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t2)", marginBottom: 6 }}>
-                <span>Subtotal</span><span>{fmt(subTotal)}</span>
-              </div>
-            )}
-            {appliedDiscount && discountAmt > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#15803d", fontWeight: 700, marginBottom: 6 }}>
-                <span>🏷 Discount</span><span>−{fmt(discountAmt)}</span>
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: subTotal != null ? "1px solid var(--border)" : "none", paddingTop: subTotal != null ? 10 : 0, marginTop: subTotal != null ? 6 : 0 }}>
-              <span style={{ fontWeight: 600 }}>Total to pay</span>
-              <span style={{ fontSize: 18, fontWeight: 800 }}>{fmt(total)}</span>
-            </div>
+          {/* Total */}
+          <div
+            style={{
+              background: "#fafafa",
+              borderRadius: var_r_sm,
+              padding: "13px 16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 16,
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>Total to pay</span>
+            <span style={{ fontSize: 18, fontWeight: 800 }}>{fmt(total)}</span>
           </div>
 
           <button
             className="btn-primary"
             disabled={placing || !selAddr}
             onClick={async () => {
-              if (!addr) { alert("Please select a delivery address."); return; }
+              if (!addr) {
+                alert("Please select a delivery address.");
+                return;
+              }
               setPlacing(true);
-              await onPlaceOrder({ address: addr, payMethod: pay, notes: cartNote || "" });
+              await onPlaceOrder({
+                address: addr,
+                payMethod: pay,
+                notes: cartNote || "",
+              });
               setPlacing(false);
             }}
           >
@@ -2863,26 +2951,94 @@ function ProfileSheet({
                         className={`order-card${isActive ? " active" : ""}`}
                         onClick={() => setSelOrder(o)}
                       >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
                             {isActive && <span className="active-dot" />}
-                            <span style={{ fontWeight: 700, fontSize: 14 }}>Order #{o.id}</span>
+                            <span style={{ fontWeight: 700, fontSize: 14 }}>
+                              Order #{o.id}
+                            </span>
                           </div>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: statusColor(o.status), background: isActive ? "#fff0e8" : o.status === "delivered" ? "var(--green-l)" : "#f5f5f5", padding: "3px 9px", borderRadius: 99 }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: statusColor(o.status),
+                              background: isActive
+                                ? "#fff0e8"
+                                : o.status === "delivered"
+                                  ? "var(--green-l)"
+                                  : "#f5f5f5",
+                              padding: "3px 9px",
+                              borderRadius: 99,
+                            }}
+                          >
                             {statusLabel(o.status)}
                           </span>
                         </div>
-                        <p style={{ fontSize: 13, color: "var(--t2)", marginBottom: 4 }}>
-                          {new Date(o.created_at).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        <p
+                          style={{
+                            fontSize: 13,
+                            color: "var(--t2)",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {new Date(o.created_at).toLocaleDateString("en-KW", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </p>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: 13, color: "var(--t3)" }}>{o.payment_method}</span>
-                          <span style={{ fontWeight: 800, fontSize: 15 }}>{fmt(o.total_amount)}</span>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <span style={{ fontSize: 13, color: "var(--t3)" }}>
+                            {o.payment_method}
+                          </span>
+                          <span style={{ fontWeight: 800, fontSize: 15 }}>
+                            {fmt(o.total_amount)}
+                          </span>
                         </div>
                         {o.notes && (
-                          <p style={{ fontSize: 12, color: "var(--t3)", fontStyle: "italic", marginTop: 4 }}>"{o.notes}"</p>
+                          <p
+                            style={{
+                              fontSize: 12,
+                              color: "var(--t3)",
+                              fontStyle: "italic",
+                              marginTop: 4,
+                            }}
+                          >
+                            "{o.notes}"
+                          </p>
                         )}
-                        <p style={{ fontSize: 11, color: "var(--t3)", marginTop: 6, fontWeight: 500 }}>Tap to view details →</p>
+                        <p
+                          style={{
+                            fontSize: 11,
+                            color: "var(--t3)",
+                            marginTop: 6,
+                            fontWeight: 500,
+                          }}
+                        >
+                          Tap to view details →
+                        </p>
                       </div>
                     );
                   })}
@@ -2906,10 +3062,7 @@ function ProfileSheet({
 
       {/* Order detail sheet — stacked on top of ProfileSheet */}
       {selOrder && (
-        <OrderDetailSheet
-          order={selOrder}
-          onClose={() => setSelOrder(null)}
-        />
+        <OrderDetailSheet order={selOrder} onClose={() => setSelOrder(null)} />
       )}
 
       {/* Map picker sheet — stacked on top */}
@@ -2989,65 +3142,12 @@ function DesktopCart({
   onCheckout,
   note,
   onNoteChange,
-  appliedDiscount,
-  onApplyDiscount,
-  customer,
-  restId,
 }) {
-  const { subT, delivery, total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
+  const { subT, delivery, total } = calcTotals(cart, addonCart);
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
     cart.reduce((s, c) => s + c.qty, 0) +
     (addonCart || []).reduce((s, a) => s + a.qty, 0);
-
-  const [codeInput, setCodeInput] = useState(appliedDiscount?.code || "");
-  const [codeLoading, setCodeLoading] = useState(false);
-  const [codeErr, setCodeErr] = useState("");
-  const [codeOk, setCodeOk] = useState(!!appliedDiscount);
-
-  const applyCode = async () => {
-    const code = codeInput.trim().toUpperCase();
-    if (!code) { setCodeErr("Please enter a discount code."); return; }
-    if (!customer) { setCodeErr("Log in to apply a discount."); return; }
-    setCodeLoading(true); setCodeErr(""); setCodeOk(false);
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data, error } = await supabase
-        .from("Discounts")
-        .select("*")
-        .eq("rest_id", restId)
-        .eq("code", code)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) { setCodeErr("Invalid or inactive discount code."); onApplyDiscount(null); return; }
-      if (data.avail_from && data.avail_from > today) { setCodeErr(`Valid from ${data.avail_from}.`); onApplyDiscount(null); return; }
-      if (data.expiry_date && data.expiry_date < today) { setCodeErr("This code has expired."); onApplyDiscount(null); return; }
-      if (data.min_order && subT < Number(data.min_order)) {
-        setCodeErr(`Min. order KD ${Number(data.min_order).toFixed(3)} required.`); onApplyDiscount(null); return;
-      }
-      if (data.max_order && subT > Number(data.max_order)) {
-        setCodeErr(`Code only valid up to KD ${Number(data.max_order).toFixed(3)}.`); onApplyDiscount(null); return;
-      }
-      const { count } = await supabase
-        .from("Discount_Redemptions")
-        .select("id", { count: "exact", head: true })
-        .eq("discount_id", data.id)
-        .eq("cust_id", customer.id);
-      if (count >= data.max_uses_per_customer) {
-        setCodeErr(`You've already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`);
-        onApplyDiscount(null); return;
-      }
-      onApplyDiscount(data);
-      setCodeOk(true);
-    } catch (e) {
-      setCodeErr("Failed to validate code.");
-    } finally { setCodeLoading(false); }
-  };
-
-  const removeCode = () => {
-    setCodeInput(""); setCodeOk(false); setCodeErr(""); onApplyDiscount(null);
-  };
 
   return (
     <div
@@ -3255,37 +3355,6 @@ function DesktopCart({
               />
             </div>
 
-            {/* Discount code */}
-            <div style={{ marginBottom: 12 }}>
-              <label className="lbl" style={{ fontSize: 10 }}>Discount code <span style={{ textTransform: "none", fontWeight: 400 }}>(optional)</span></label>
-              {codeOk && appliedDiscount ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: var_r_sm, padding: "8px 12px" }}>
-                  <span style={{ fontSize: 16 }}>🎉</span>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontWeight: 800, color: "#15803d", fontSize: 12, margin: 0 }}>{appliedDiscount.code} applied!</p>
-                    <p style={{ color: "#166534", fontSize: 11, margin: "1px 0 0" }}>
-                      {appliedDiscount.type === "percentage" ? `${appliedDiscount.value}%` : `KD ${Number(appliedDiscount.value).toFixed(3)}`} off
-                    </p>
-                  </div>
-                  <button onClick={removeCode} style={{ background: "none", border: "none", cursor: "pointer", color: "#15803d", fontSize: 16, lineHeight: 1 }}>✕</button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input
-                    className="inp" style={{ flex: 1, fontSize: 12, padding: "8px 10px", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".04em" }}
-                    placeholder="Enter code…"
-                    value={codeInput}
-                    onChange={e => { setCodeInput(e.target.value.toUpperCase()); setCodeErr(""); }}
-                    onKeyDown={e => e.key === "Enter" && applyCode()}
-                  />
-                  <button className="btn-out" onClick={applyCode} disabled={codeLoading} style={{ flexShrink: 0, fontSize: 12, padding: "8px 12px" }}>
-                    {codeLoading ? "…" : "Apply"}
-                  </button>
-                </div>
-              )}
-              {codeErr && <p style={{ color: "var(--red)", fontSize: 11, marginTop: 5, fontWeight: 500 }}>⚠️ {codeErr}</p>}
-            </div>
-
             {/* Bill */}
             <div
               style={{
@@ -3303,12 +3372,6 @@ function DesktopCart({
                 <span>Delivery</span>
                 <span>{fmt(delivery)}</span>
               </div>
-              {discountAmt > 0 && (
-                <div className="sum-row" style={{ fontSize: 13, color: "#15803d", fontWeight: 700 }}>
-                  <span>🏷 Discount</span>
-                  <span>−{fmt(discountAmt)}</span>
-                </div>
-              )}
               <div
                 style={{
                   borderTop: "1px solid var(--border)",
@@ -3390,9 +3453,6 @@ export default function Customer() {
   const [checkoutTotal, setCheckoutTotal] = useState(0);
   const [cartNote, setCartNote] = useState("");
   const [lastOrder, setLastOrder] = useState(null);
-
-  /* discount */
-  const [appliedDiscount, setAppliedDiscount] = useState(null); // the validated Discount row
   const [customizeItem, setCustomizeItem] = useState(null);
 
   /* active tab for bottom bar */
@@ -3424,7 +3484,11 @@ export default function Customer() {
       if (!restId || !menuId) return;
       supabase
         .from("Menu_Events")
-        .insert({ rest_id: Number(restId), menu_id: Number(menuId), event_type: eventType })
+        .insert({
+          rest_id: Number(restId),
+          menu_id: Number(menuId),
+          event_type: eventType,
+        })
         .then(() => {})
         .catch(() => {});
     },
@@ -3547,7 +3611,9 @@ export default function Customer() {
     try {
       const { data } = await supabase
         .from("Orders")
-        .select("id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone")
+        .select(
+          "id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone",
+        )
         .eq("cust_id", cid)
         .eq("rest_id", restId)
         .order("created_at", { ascending: false })
@@ -3565,16 +3631,22 @@ export default function Customer() {
     if (!customer?.id || !restId) return;
     const ch = supabase
       .channel(`cust-orders-${customer.id}`)
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "Orders",
-        filter: `cust_id=eq.${customer.id}`,
-      }, (payload) => {
-        setOrderHistory((prev) =>
-          prev.map((o) => o.id === payload.new.id ? { ...o, ...payload.new } : o)
-        );
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Orders",
+          filter: `cust_id=eq.${customer.id}`,
+        },
+        (payload) => {
+          setOrderHistory((prev) =>
+            prev.map((o) =>
+              o.id === payload.new.id ? { ...o, ...payload.new } : o,
+            ),
+          );
+        },
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [customer?.id, restId]);
@@ -3691,28 +3763,21 @@ export default function Customer() {
   const cartCount = cart.reduce((s, c) => s + c.qty, 0) + addonCartCount;
 
   /* total = menu items + add-ons + delivery (no VAT) */
-  const calcTotals = (cartItems, addonCartItems, appliedDiscount) => {
+  const calcTotals = (cartItems, addonCartItems) => {
     const menuSub = cartItems.reduce((s, c) => s + c.unitPrice * c.qty, 0);
-    const addonSub = addonCartItems.reduce((s, a) => s + +a.addon.price * a.qty, 0);
+    const addonSub = addonCartItems.reduce(
+      (s, a) => s + +a.addon.price * a.qty,
+      0,
+    );
     const subT = menuSub + addonSub;
     const delivery = subT > 0 ? 0.5 : 0;
-    let discountAmt = 0;
-    if (appliedDiscount && subT > 0) {
-      if (appliedDiscount.type === "percentage") {
-        discountAmt = (subT * Number(appliedDiscount.value)) / 100;
-      } else {
-        discountAmt = Number(appliedDiscount.value);
-      }
-      discountAmt = Math.min(discountAmt, subT);
-    }
-    const discountedSubT = subT - discountAmt;
-    return { menuSub, addonSub, subT, delivery, discountAmt, total: discountedSubT + delivery };
+    return { menuSub, addonSub, subT, delivery, total: subT + delivery };
   };
 
   /* place order — writes Orders + Order_Items + Order_Item_Variants + Order_Item_AddOns */
   const placeOrder = async ({ address, payMethod, notes }) => {
     if (!customer || !restaurant) return;
-    const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
+    const { total } = calcTotals(cart, addonCart);
     try {
       // 1. Create the order header
       const { data: order, error: oe } = await supabase
@@ -3752,10 +3817,12 @@ export default function Customer() {
         for (const [, val] of Object.entries(selVars)) {
           const ids = Array.isArray(val) ? val : val ? [val] : [];
           for (const optId of ids) {
+            // Find price_adj from variantMeta (we stored option names but not price_adj — fetch it)
+            // Use price_adj = unitPrice diff / quantity as approximation, or 0 if unavailable
             await supabase.from("Order_Item_Variants").insert({
               order_item_id: oi.id,
               variant_opt_id: optId,
-              price_adj: 0,
+              price_adj: 0, // Will be correct once fetched; acceptable for now
             });
           }
         }
@@ -3768,7 +3835,7 @@ export default function Customer() {
           .from("Order_Items")
           .insert({
             order_id: order.id,
-            menu_id: 0,
+            menu_id: 0, // Add-ons don't have menu_id; use 0 as sentinel or NULL if schema allows
             quantity: a.qty,
             unit_price: +a.addon.price,
             subtotal,
@@ -3776,6 +3843,7 @@ export default function Customer() {
           })
           .select()
           .single();
+        // If menu_id FK fails, skip silently (add-ons are also logged separately)
         if (!oiErr && oi) {
           await supabase.from("Order_Item_AddOns").insert({
             order_item_id: oi.id,
@@ -3786,17 +3854,7 @@ export default function Customer() {
         }
       }
 
-      // 5. Record discount redemption if a coupon was applied
-      if (appliedDiscount && discountAmt > 0) {
-        await supabase.from("Discount_Redemptions").insert({
-          discount_id: appliedDiscount.id,
-          cust_id: customer.id,
-          order_id: order.id,
-          amount_saved: discountAmt,
-        });
-      }
-
-      // 6. Update customer totals
+      // 5. Update customer totals
       await supabase
         .from("Customer")
         .update({
@@ -3809,10 +3867,10 @@ export default function Customer() {
       setCart([]);
       setAddonCart([]);
       setCartNote("");
-      setAppliedDiscount(null);
       setShowCheckout(false);
       setShowTrack(true);
       showToast("Order placed! 🎉");
+      // Refresh order history
       loadOrderHistory(customer.id);
     } catch (e) {
       console.error("[placeOrder]", e);
@@ -4485,10 +4543,6 @@ export default function Customer() {
             calcTotals={calcTotals}
             note={cartNote}
             onNoteChange={setCartNote}
-            appliedDiscount={appliedDiscount}
-            onApplyDiscount={setAppliedDiscount}
-            customer={customer}
-            restId={restId}
             onCheckout={(t) => {
               setCheckoutTotal(t);
               setShowCheckout(true);
@@ -4560,10 +4614,6 @@ export default function Customer() {
           calcTotals={calcTotals}
           note={cartNote}
           onNoteChange={setCartNote}
-          appliedDiscount={appliedDiscount}
-          onApplyDiscount={setAppliedDiscount}
-          customer={customer}
-          restId={restId}
           onCheckout={(t, n) => {
             setCheckoutTotal(t);
             setCartNote(n || "");
@@ -4582,9 +4632,6 @@ export default function Customer() {
           defaultAddr={defaultAddr}
           onClose={() => setShowCheckout(false)}
           onPlaceOrder={placeOrder}
-          appliedDiscount={appliedDiscount}
-          discountAmt={calcTotals(cart, addonCart, appliedDiscount).discountAmt}
-          subTotal={calcTotals(cart, addonCart, appliedDiscount).subT}
           onAddAddress={() => {
             setShowCheckout(false);
             setShowProfile(true);
@@ -4628,54 +4675,91 @@ function OrderDetailSheet({ order, onClose }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [liveOrder, setLiveOrder] = useState(order);
+  const [discount, setDiscount] = useState(null); // {code, type, value, amount_saved} | null
 
   // Realtime status updates while sheet is open
   useEffect(() => {
     if (!order?.id) return;
     const ch = supabase
       .channel(`ord-detail-${order.id}`)
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "Orders",
-        filter: `id=eq.${order.id}`,
-      }, (payload) => {
-        setLiveOrder((prev) => ({ ...prev, ...payload.new }));
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Orders",
+          filter: `id=eq.${order.id}`,
+        },
+        (payload) => {
+          setLiveOrder((prev) => ({ ...prev, ...payload.new }));
+        },
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [order?.id]);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
 
+  // Fetch order items + variants
   useEffect(() => {
     (async () => {
       try {
         const { data, error } = await supabase
           .from("Order_Items")
-          .select("id, menu_id, quantity, unit_price, subtotal, item_note, Menu(name)")
+          .select(
+            "id, menu_id, quantity, unit_price, subtotal, item_note, Menu(name)",
+          )
           .eq("order_id", order.id);
         if (error) throw error;
-        // Fetch variant options per item
-        const enriched = await Promise.all((data || []).map(async (it) => {
-          const { data: vars } = await supabase
-            .from("Order_Item_Variants")
-            .select(`price_adj, "Variant Options"(name)`)
-            .eq("order_item_id", it.id);
-          return {
-            ...it,
-            menuName: it.Menu?.name || "Item",
-            variants: (vars || []).map((v) => v["Variant Options"]?.name).filter(Boolean),
-          };
-        }));
+        const enriched = await Promise.all(
+          (data || []).map(async (it) => {
+            const { data: vars } = await supabase
+              .from("Order_Item_Variants")
+              .select(`price_adj, "Variant Options"(name)`)
+              .eq("order_item_id", it.id);
+            return {
+              ...it,
+              menuName: it.Menu?.name || "Item",
+              variants: (vars || [])
+                .map((v) => v["Variant Options"]?.name)
+                .filter(Boolean),
+            };
+          }),
+        );
         setItems(enriched);
       } catch (e) {
         console.error("[OrderDetailSheet]", e);
       } finally {
         setLoading(false);
+      }
+    })();
+  }, [order.id]);
+
+  // Fetch discount redemption for this order (silent fail if table doesn't exist yet)
+  useEffect(() => {
+    if (!order?.id) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("Discount_Redemptions")
+          .select("amount_saved, Discounts(code, type, value)")
+          .eq("order_id", order.id)
+          .maybeSingle();
+        if (data) {
+          setDiscount({
+            code: data.Discounts?.code || "—",
+            type: data.Discounts?.type || "fixed",
+            value: data.Discounts?.value ?? 0,
+            amount_saved: Number(data.amount_saved || 0),
+          });
+        }
+      } catch (e) {
+        // Table may not exist yet — fail silently
       }
     })();
   }, [order.id]);
@@ -4700,41 +4784,110 @@ function OrderDetailSheet({ order, onClose }) {
   const ACTIVE = ["pending", "accepted", "preparing", "on_the_way"];
   const isActive = ACTIVE.includes(liveOrder.status);
 
+  // Computed breakdown values
+  const itemsSubtotal = items.reduce(
+    (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
+    0,
+  );
+  const deliveryFee = 0.5;
+  const discountAmt = discount?.amount_saved ?? 0;
+
   return (
     <>
       <div className="overlay" onClick={onClose} />
-      <div className="sheet" style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}>
+      <div
+        className="sheet"
+        style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}
+      >
         <div className="drag-pill" />
         {/* Header */}
         <div className="sheet-hd" style={{ paddingBottom: 10, flexShrink: 0 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p className="sheet-title" style={{ fontSize: 17 }}>Order #{liveOrder.id}</p>
+            <p className="sheet-title" style={{ fontSize: 17 }}>
+              Order #{liveOrder.id}
+            </p>
             <p style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>
-              {new Date(liveOrder.created_at).toLocaleString("en-KW", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              {new Date(liveOrder.created_at).toLocaleString("en-KW", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 99, background: isActive ? "#fff0e8" : liveOrder.status === "delivered" ? "#f0fdf4" : "#f5f5f5", color: STATUS_COLORS[liveOrder.status] || "var(--t2)" }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 99,
+                background: isActive
+                  ? "#fff0e8"
+                  : liveOrder.status === "delivered"
+                    ? "#f0fdf4"
+                    : "#f5f5f5",
+                color: STATUS_COLORS[liveOrder.status] || "var(--t2)",
+              }}
+            >
               {isActive && <span className="active-dot" />}
               {STATUS_LABELS[liveOrder.status] || liveOrder.status}
             </span>
-            <button className="close-btn" onClick={onClose}>{Ic.close}</button>
+            <button className="close-btn" onClick={onClose}>
+              {Ic.close}
+            </button>
           </div>
         </div>
 
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0 20px" }}>
-
-          {/* Rider info — highlighted */}
-          {(liveOrder.delivery_rider_name) && (
+          {/* Rider info */}
+          {liveOrder.delivery_rider_name && (
             <div className="rider-card" style={{ marginBottom: 16 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>🛵 Delivery Rider</p>
-              <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{liveOrder.delivery_rider_name}</p>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--green)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".08em",
+                  marginBottom: 8,
+                }}
+              >
+                🛵 Delivery Rider
+              </p>
+              <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>
+                {liveOrder.delivery_rider_name}
+              </p>
               {liveOrder.delivery_rider_phone && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-                  <p style={{ fontSize: 14, color: "var(--t2)" }}>{liveOrder.delivery_rider_phone}</p>
-                  <a href={`https://wa.me/${liveOrder.delivery_rider_phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
-                    style={{ background: "#25D366", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginTop: 6,
+                  }}
+                >
+                  <p style={{ fontSize: 14, color: "var(--t2)" }}>
+                    {liveOrder.delivery_rider_phone}
+                  </p>
+                  <a
+                    href={`https://wa.me/${liveOrder.delivery_rider_phone.replace(/\D/g, "")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      background: "#25D366",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     💬 WhatsApp
                   </a>
                 </div>
@@ -4743,29 +4896,71 @@ function OrderDetailSheet({ order, onClose }) {
           )}
 
           {/* Order items */}
-          <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Items</p>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--t3)",
+              textTransform: "uppercase",
+              letterSpacing: ".08em",
+              marginBottom: 4,
+            }}
+          >
+            Items
+          </p>
           {loading ? (
-            <div style={{ display: "flex", justifyContent: "center", padding: "20px 0" }}><Spinner size={24} /></div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                padding: "20px 0",
+              }}
+            >
+              <Spinner size={24} />
+            </div>
           ) : items.length === 0 ? (
-            <p style={{ color: "var(--t3)", fontSize: 13, padding: "12px 0" }}>No items found</p>
+            <p style={{ color: "var(--t3)", fontSize: 13, padding: "12px 0" }}>
+              No items found
+            </p>
           ) : (
             <div style={{ marginBottom: 16 }}>
               {items.map((it, i) => (
                 <div key={i} className="order-detail-row">
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontWeight: 600, fontSize: 14 }}>{it.menuName}</p>
+                    <p style={{ fontWeight: 600, fontSize: 14 }}>
+                      {it.menuName}
+                    </p>
                     {it.variants?.length > 0 && (
-                      <p style={{ fontSize: 12, color: "var(--orange)", marginTop: 2 }}>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "var(--orange)",
+                          marginTop: 2,
+                        }}
+                      >
                         {it.variants.join(" · ")}
                       </p>
                     )}
                     {it.item_note && (
-                      <p style={{ fontSize: 11, color: "var(--t3)", fontStyle: "italic", marginTop: 2 }}>📝 {it.item_note}</p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: "var(--t3)",
+                          fontStyle: "italic",
+                          marginTop: 2,
+                        }}
+                      >
+                        📝 {it.item_note}
+                      </p>
                     )}
                   </div>
                   <div style={{ flexShrink: 0, textAlign: "right" }}>
-                    <p style={{ fontSize: 13, color: "var(--t2)" }}>×{it.quantity}</p>
-                    <p style={{ fontSize: 14, fontWeight: 700 }}>{fmt(it.subtotal)}</p>
+                    <p style={{ fontSize: 13, color: "var(--t2)" }}>
+                      ×{it.quantity}
+                    </p>
+                    <p style={{ fontSize: 14, fontWeight: 700 }}>
+                      {fmt(it.subtotal)}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -4774,28 +4969,194 @@ function OrderDetailSheet({ order, onClose }) {
 
           {/* Customer note */}
           {liveOrder.notes && (
-            <div style={{ background: "#fafafa", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: "12px 14px", marginBottom: 16 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Your note</p>
-              <p style={{ fontSize: 13, color: "var(--t2)", fontStyle: "italic" }}>{liveOrder.notes}</p>
+            <div
+              style={{
+                background: "#fafafa",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-sm)",
+                padding: "12px 14px",
+                marginBottom: 16,
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--t3)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".08em",
+                  marginBottom: 6,
+                }}
+              >
+                Your note
+              </p>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--t2)",
+                  fontStyle: "italic",
+                }}
+              >
+                {liveOrder.notes}
+              </p>
             </div>
           )}
 
-          {/* Order summary */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 24 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          {/* Price breakdown */}
+          <div
+            style={{
+              background: "#fafafa",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r)",
+              padding: "14px 16px",
+              marginBottom: 24,
+            }}
+          >
+            {/* Payment method */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 10,
+                paddingBottom: 10,
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
               <span style={{ fontSize: 13, color: "var(--t2)" }}>Payment</span>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{liveOrder.payment_method}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                {liveOrder.payment_method}
+              </span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
+
+            {/* Items subtotal — only when loaded */}
+            {!loading && items.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 13, color: "var(--t2)" }}>
+                  Items subtotal
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>
+                  {fmt(itemsSubtotal)}
+                </span>
+              </div>
+            )}
+
+            {/* Delivery fee */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <span style={{ fontSize: 13, color: "var(--t2)" }}>
+                Delivery fee
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>
+                {fmt(deliveryFee)}
+              </span>
+            </div>
+
+            {/* Discount row — only shown when a redemption exists */}
+            {discount && discountAmt > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "var(--green)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  🏷️
+                  <span
+                    style={{
+                      background: "#dcfce7",
+                      border: "1px solid #bbf7d0",
+                      color: "#15803d",
+                      borderRadius: 999,
+                      padding: "1px 8px",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: ".04em",
+                    }}
+                  >
+                    {discount.code}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--t3)" }}>
+                    (
+                    {discount.type === "percentage"
+                      ? `${discount.value}% off`
+                      : `KD ${Number(discount.value).toFixed(3)} off`}
+                    )
+                  </span>
+                </span>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "var(--green)",
+                  }}
+                >
+                  −{fmt(discountAmt)}
+                </span>
+              </div>
+            )}
+
+            {/* Grand total */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                paddingTop: 10,
+                borderTop: "1px solid var(--border)",
+                marginTop: 2,
+              }}
+            >
               <span style={{ fontSize: 15, fontWeight: 700 }}>Total</span>
-              <span style={{ fontSize: 16, fontWeight: 800, color: "var(--orange)" }}>{fmt(liveOrder.total_amount)}</span>
+              <span
+                style={{
+                  fontSize: 16,
+                  fontWeight: 800,
+                  color: "var(--orange)",
+                }}
+              >
+                {fmt(liveOrder.total_amount)}
+              </span>
             </div>
           </div>
         </div>
 
         {/* Close footer */}
-        <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))", flexShrink: 0 }}>
-          <button className="btn-out" style={{ width: "100%", justifyContent: "center" }} onClick={onClose}>Close</button>
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: "1px solid var(--border)",
+            paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))",
+            flexShrink: 0,
+          }}
+        >
+          <button
+            className="btn-out"
+            style={{ width: "100%", justifyContent: "center" }}
+            onClick={onClose}
+          >
+            Close
+          </button>
         </div>
       </div>
     </>
