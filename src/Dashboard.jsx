@@ -3518,6 +3518,1746 @@ function CustomersPage({ t, user }) {
   );
 }
 
+// ─── Discounts Page ───────────────────────────────────────────────────────────
+/*
+  Requires two Supabase tables (run once):
+
+  CREATE TABLE public.Discounts (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rest_id       bigint NOT NULL REFERENCES public.Restaurants(id),
+    code          text NOT NULL,
+    type          text NOT NULL CHECK (type IN ('percentage','fixed')),
+    value         numeric NOT NULL,
+    min_order     numeric NOT NULL DEFAULT 0,
+    max_order     numeric,
+    avail_from    date,
+    expiry_date   date,
+    is_active     boolean NOT NULL DEFAULT true,
+    max_uses_per_customer integer NOT NULL DEFAULT 1,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (rest_id, code)
+  );
+
+  CREATE TABLE public.Discount_Redemptions (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    discount_id   bigint NOT NULL REFERENCES public.Discounts(id),
+    cust_id       bigint NOT NULL REFERENCES public.Customer(id),
+    order_id      bigint REFERENCES public.Orders(id),
+    amount_saved  numeric NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now()
+  );
+*/
+
+function DiscountsPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+
+  // ── state ──────────────────────────────────────────────────────────────────
+  const [subPlan, setSubPlan] = useState(null); // 'Basic' | 'Premium' etc.
+  const [discounts, setDiscounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [search, setSearch] = useState("");
+
+  // modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null); // discount obj being edited, or null = new
+  const [saving, setSaving] = useState(false);
+  const [modalErr, setModalErr] = useState("");
+
+  // redemptions drawer
+  const [redeemDisc, setRedeemDisc] = useState(null); // discount to show redemptions for
+  const [redemptions, setRedemptions] = useState([]);
+  const [redeemLoading, setRedeemLoading] = useState(false);
+
+  // form fields
+  const emptyForm = {
+    code: "",
+    type: "percentage",
+    value: "",
+    min_order: "",
+    max_order: "",
+    avail_from: "",
+    expiry_date: "",
+    is_active: true,
+    max_uses_per_customer: 1,
+  };
+  const [form, setForm] = useState(emptyForm);
+  const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // ── load restaurant plan + discounts ──────────────────────────────────────
+  const load = useCallback(async () => {
+    if (!restId) {
+      setLoading(false);
+      setErr("No restaurant linked.");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      // fetch sub_plan
+      const { data: rest } = await supabase
+        .from("Restaurants")
+        .select("sub_plan")
+        .eq("id", restId)
+        .maybeSingle();
+      setSubPlan(rest?.sub_plan || "Basic");
+
+      // fetch discounts + redemption stats in one go
+      const { data: rows, error: dErr } = await supabase
+        .from("Discounts")
+        .select(
+          `
+          id, code, type, value, min_order, max_order,
+          avail_from, expiry_date, is_active, max_uses_per_customer, created_at,
+          Discount_Redemptions(id, amount_saved)
+        `,
+        )
+        .eq("rest_id", restId)
+        .order("created_at", { ascending: false });
+      if (dErr) throw dErr;
+
+      setDiscounts(rows || []);
+    } catch (e) {
+      console.error("[DiscountsPage]", e);
+      setErr(e.message || "Failed to load discounts.");
+    } finally {
+      setLoading(false);
+    }
+  }, [restId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // ── computed helpers ───────────────────────────────────────────────────────
+  const isExpired = (d) =>
+    d?.expiry_date &&
+    new Date(d.expiry_date) < new Date(new Date().toDateString());
+  const isNotStarted = (d) =>
+    d?.avail_from &&
+    new Date(d.avail_from) > new Date(new Date().toDateString());
+
+  const effectiveStatus = (d) => {
+    if (!d.is_active) return "inactive";
+    if (isExpired(d)) return "expired";
+    if (isNotStarted(d)) return "scheduled";
+    return "active";
+  };
+
+  const statusMeta = {
+    active: {
+      label: "Active",
+      bg: "#dcfce7",
+      color: "#15803d",
+      border: "#bbf7d0",
+    },
+    inactive: {
+      label: "Inactive",
+      bg: "#f1f5f9",
+      color: "#64748b",
+      border: "#e2e8f0",
+    },
+    expired: {
+      label: "Expired",
+      bg: "#fee2e2",
+      color: "#b91c1c",
+      border: "#fecaca",
+    },
+    scheduled: {
+      label: "Scheduled",
+      bg: "#fef9c3",
+      color: "#92400e",
+      border: "#fde68a",
+    },
+  };
+
+  const discountLabel = (d) =>
+    d.type === "percentage"
+      ? `${d.value}% off`
+      : `KD ${Number(d.value).toFixed(3)} off`;
+
+  const filteredDiscounts = discounts.filter((d) =>
+    d.code.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  // aggregate stats
+  const totalStats = discounts.reduce(
+    (acc, d) => {
+      const reds = d.Discount_Redemptions || [];
+      acc.redemptions += reds.length;
+      acc.saved += reds.reduce((s, r) => s + Number(r.amount_saved || 0), 0);
+      return acc;
+    },
+    { redemptions: 0, saved: 0 },
+  );
+
+  // ── open/close modal ───────────────────────────────────────────────────────
+  const openNew = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setModalErr("");
+    setModalOpen(true);
+  };
+
+  const openEdit = (d) => {
+    setEditing(d);
+    setForm({
+      code: d.code,
+      type: d.type,
+      value: String(d.value),
+      min_order: d.min_order != null ? String(d.min_order) : "",
+      max_order: d.max_order != null ? String(d.max_order) : "",
+      avail_from: d.avail_from || "",
+      expiry_date: d.expiry_date || "",
+      is_active: d.is_active,
+      max_uses_per_customer: d.max_uses_per_customer ?? 1,
+    });
+    setModalErr("");
+    setModalOpen(true);
+  };
+
+  // ── validate form ──────────────────────────────────────────────────────────
+  const validate = () => {
+    const code = form.code.trim().toUpperCase();
+    if (!code) return "Discount code is required.";
+    if (!/^[A-Z0-9_-]+$/.test(code))
+      return "Code may only contain letters, numbers, _ and -.";
+    const val = Number(form.value);
+    if (!form.value || isNaN(val) || val <= 0)
+      return "Discount value must be a positive number.";
+    if (form.type === "percentage" && val > 100)
+      return "Percentage cannot exceed 100%.";
+    const minO = Number(form.min_order || 0);
+    if (isNaN(minO) || minO < 0) return "Minimum order must be 0 or more.";
+    if (form.type === "fixed" && val >= minO && minO > 0)
+      return `Min. order (KD ${minO.toFixed(3)}) must be greater than the discount value (KD ${val.toFixed(3)}).`;
+    if (form.type === "fixed" && minO === 0)
+      return "For a fixed discount, please set a minimum order value greater than the discount amount.";
+    if (form.max_order) {
+      const maxO = Number(form.max_order);
+      if (isNaN(maxO) || maxO <= 0)
+        return "Max order must be a positive number.";
+      if (maxO <= minO) return "Max order must be greater than min order.";
+    }
+    if (
+      form.avail_from &&
+      form.expiry_date &&
+      form.avail_from > form.expiry_date
+    )
+      return "Available from date cannot be after expiry date.";
+    const mup = Number(form.max_uses_per_customer);
+    if (isNaN(mup) || mup < 1)
+      return "Max uses per customer must be at least 1.";
+    return null;
+  };
+
+  // ── save ──────────────────────────────────────────────────────────────────
+  const save = async () => {
+    const validationError = validate();
+    if (validationError) {
+      setModalErr(validationError);
+      return;
+    }
+    setSaving(true);
+    setModalErr("");
+    try {
+      const payload = {
+        rest_id: restId,
+        code: form.code.trim().toUpperCase(),
+        type: form.type,
+        value: Number(form.value),
+        min_order: Number(form.min_order || 0),
+        max_order: form.max_order ? Number(form.max_order) : null,
+        avail_from: form.avail_from || null,
+        expiry_date: form.expiry_date || null,
+        is_active: form.is_active,
+        max_uses_per_customer: Number(form.max_uses_per_customer),
+      };
+      if (editing) {
+        const { error } = await supabase
+          .from("Discounts")
+          .update(payload)
+          .eq("id", editing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("Discounts").insert(payload);
+        if (error) {
+          if (error.code === "23505")
+            throw new Error(
+              "A discount with this code already exists for your restaurant.",
+            );
+          throw error;
+        }
+      }
+      setModalOpen(false);
+      load();
+    } catch (e) {
+      setModalErr(e.message || "Failed to save discount.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── toggle active (with expiry guard) ─────────────────────────────────────
+  const toggleActive = async (d) => {
+    // If trying to re-activate an expired code, block
+    if (!d.is_active && isExpired(d)) {
+      alert(
+        "This code has expired. Please edit the expiry date before re-activating.",
+      );
+      return;
+    }
+    try {
+      await supabase
+        .from("Discounts")
+        .update({ is_active: !d.is_active })
+        .eq("id", d.id);
+      setDiscounts((prev) =>
+        prev.map((x) =>
+          x.id === d.id ? { ...x, is_active: !x.is_active } : x,
+        ),
+      );
+    } catch (e) {
+      alert("Failed to update status: " + e.message);
+    }
+  };
+
+  // ── delete ─────────────────────────────────────────────────────────────────
+  const deleteDiscount = async (d) => {
+    if (!window.confirm(`Delete code "${d.code}"? This cannot be undone.`))
+      return;
+    try {
+      await supabase.from("Discounts").delete().eq("id", d.id);
+      setDiscounts((prev) => prev.filter((x) => x.id !== d.id));
+    } catch (e) {
+      alert("Failed to delete: " + e.message);
+    }
+  };
+
+  // ── load redemptions ───────────────────────────────────────────────────────
+  const openRedemptions = async (d) => {
+    setRedeemDisc(d);
+    setRedeemLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("Discount_Redemptions")
+        .select(
+          "id, amount_saved, created_at, cust_id, order_id, Customer(cust_name, ph_num)",
+        )
+        .eq("discount_id", d.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setRedemptions(data || []);
+    } catch (e) {
+      setRedemptions([]);
+    } finally {
+      setRedeemLoading(false);
+    }
+  };
+
+  const fmtDate = (d) =>
+    d
+      ? new Date(d).toLocaleDateString("en-KW", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "—";
+
+  // ── Premium gate ──────────────────────────────────────────────────────────
+  if (!loading && subPlan === "Basic") {
+    return (
+      <div
+        style={{
+          padding: "40px 24px",
+          maxWidth: 560,
+          margin: "0 auto",
+          fontFamily: "'Lato', sans-serif",
+        }}
+      >
+        <style>{`
+          @keyframes discFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+          .disc-float { animation: discFloat 3s ease-in-out infinite; }
+        `}</style>
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 20,
+            padding: "48px 36px",
+            textAlign: "center",
+            boxShadow: `0 4px 24px ${t.accent}14`,
+          }}
+        >
+          <div
+            className="disc-float"
+            style={{ fontSize: 64, marginBottom: 20 }}
+          >
+            🏷️
+          </div>
+          <h2
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              color: t.text,
+              fontSize: 28,
+              fontWeight: 800,
+              margin: "0 0 10px",
+            }}
+          >
+            Unlock Discount Codes
+          </h2>
+          <p
+            style={{
+              color: t.subtle,
+              fontSize: 14,
+              lineHeight: 1.6,
+              margin: "0 0 28px",
+            }}
+          >
+            Discount codes, promo campaigns, and coupon analytics are available
+            on our
+            <strong style={{ color: t.accent }}> Premium plan</strong>. Upgrade
+            to start rewarding your customers and driving more orders.
+          </p>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              justifyContent: "center",
+              marginBottom: 28,
+            }}
+          >
+            {[
+              "Percentage & fixed discounts",
+              "Per-customer usage limits",
+              "Redemption analytics",
+              "Expiry & availability dates",
+              "Sales revenue tracking",
+            ].map((f) => (
+              <span
+                key={f}
+                style={{
+                  background: t.accentBg,
+                  border: `1px solid ${t.accentBorder}`,
+                  color: t.accent,
+                  borderRadius: 999,
+                  padding: "5px 14px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                ✓ {f}
+              </span>
+            ))}
+          </div>
+          <a
+            href="/#pricing"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              background: t.accent,
+              color: "#fff",
+              borderRadius: 12,
+              padding: "14px 32px",
+              fontSize: 15,
+              fontWeight: 700,
+              textDecoration: "none",
+              boxShadow: `0 4px 16px ${t.accent}44`,
+              transition: "opacity .2s",
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.opacity = "0.88")}
+            onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            🚀 View Pricing Plans
+          </a>
+          <p style={{ color: t.muted, fontSize: 12, marginTop: 16 }}>
+            You're currently on the <strong>Basic</strong> plan.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main UI ───────────────────────────────────────────────────────────────
+  return (
+    <div
+      style={{
+        padding: "24px 20px 60px",
+        maxWidth: 1100,
+        fontFamily: "'Lato', sans-serif",
+      }}
+    >
+      <style>{`
+        .disc-table { width: 100%; border-collapse: collapse; min-width: 700px; }
+        .disc-table thead th {
+          padding: 11px 14px; text-align: left;
+          font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+          white-space: nowrap; cursor: default; user-select: none;
+        }
+        .disc-table tbody td { padding: 13px 14px; font-size: 13px; vertical-align: middle; }
+        .disc-table tbody tr { border-bottom: 1px solid; transition: background .12s; }
+        .disc-table tbody tr:last-child { border-bottom: none; }
+        .disc-toggle { position:relative; width:42px; height:23px; cursor:pointer; }
+        .disc-toggle input { opacity:0; width:0; height:0; position:absolute; }
+        .disc-toggle-track {
+          position:absolute; inset:0; border-radius:999px;
+          transition:background .25s;
+        }
+        .disc-toggle-thumb {
+          position:absolute; top:3px; left:3px;
+          width:17px; height:17px; border-radius:50%; background:#fff;
+          box-shadow:0 1px 4px rgba(0,0,0,.2);
+          transition:transform .25s;
+        }
+        .disc-toggle input:checked + .disc-toggle-track { }
+        .disc-modal-backdrop {
+          position:fixed; inset:0; z-index:60;
+          background:rgba(0,0,0,.45); backdrop-filter:blur(4px);
+          display:flex; align-items:flex-end; justify-content:center;
+        }
+        @media(min-width:560px){ .disc-modal-backdrop { align-items:center; } }
+        .disc-modal {
+          width:100%; max-width:520px; max-height:92vh;
+          border-radius:20px 20px 0 0; overflow:hidden; display:flex; flex-direction:column;
+        }
+        @media(min-width:560px){ .disc-modal { border-radius:20px; } }
+        .disc-inp {
+          width:100%; box-sizing:border-box; border-radius:10px;
+          padding:10px 14px; font-size:13.5px; outline:none; transition:border .15s;
+          font-family:'Lato',sans-serif;
+        }
+        .disc-inp:focus { box-shadow:0 0 0 3px rgba(196,113,26,.15); }
+        .disc-select {
+          width:100%; box-sizing:border-box; border-radius:10px;
+          padding:10px 14px; font-size:13.5px; outline:none;
+          font-family:'Lato',sans-serif; cursor:pointer;
+          appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+          background-repeat:no-repeat; background-position:right 12px center;
+          padding-right:36px;
+        }
+        .disc-stat-card {
+          border-radius:14px; padding:16px 20px; flex:1; min-width:130px;
+        }
+        .disc-redemption-row {
+          display:flex; align-items:flex-start; gap:12px;
+          padding:12px 0; border-bottom:1px solid;
+        }
+        .disc-redemption-row:last-child { border-bottom:none; }
+        @keyframes discSlideUp {
+          from { opacity:0; transform:translateY(20px); }
+          to   { opacity:1; transform:translateY(0); }
+        }
+        .disc-modal-anim { animation: discSlideUp .28s ease; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: 22,
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontFamily: "'Cormorant Garamond',serif",
+              color: t.text,
+              fontSize: "clamp(26px,5vw,36px)",
+              fontWeight: 800,
+              margin: 0,
+              lineHeight: 1.1,
+            }}
+          >
+            Discount Codes
+          </h1>
+          <p style={{ color: t.subtle, fontSize: 13, margin: "4px 0 0" }}>
+            {loading
+              ? "Loading…"
+              : `${discounts.length} code${discounts.length !== 1 ? "s" : ""}`}
+          </p>
+        </div>
+        <button
+          onClick={openNew}
+          style={{
+            background: t.accent,
+            color: "#fff",
+            border: "none",
+            borderRadius: 12,
+            padding: "10px 20px",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            boxShadow: `0 4px 14px ${t.accent}44`,
+          }}
+        >
+          + New Discount Code
+        </button>
+      </div>
+
+      {err && (
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#B83232",
+            borderRadius: 10,
+            padding: "10px 16px",
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          ⚠️ {err}
+        </div>
+      )}
+
+      {/* ── Summary stat cards ── */}
+      {!loading && (
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 22,
+          }}
+        >
+          {[
+            {
+              label: "Total Codes",
+              value: discounts.length,
+              icon: "🏷️",
+              color: t.accent,
+            },
+            {
+              label: "Active",
+              value: discounts.filter((d) => effectiveStatus(d) === "active")
+                .length,
+              icon: "✅",
+              color: t.green,
+            },
+            {
+              label: "Total Redemptions",
+              value: totalStats.redemptions,
+              icon: "🔄",
+              color: "#6366f1",
+            },
+            {
+              label: "Total Savings Given",
+              value: `KD ${totalStats.saved.toFixed(3)}`,
+              icon: "💰",
+              color: "#f59e0b",
+            },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="disc-stat-card"
+              style={{ background: t.surface, border: `1px solid ${t.border}` }}
+            >
+              <div style={{ fontSize: 20, marginBottom: 6 }}>{s.icon}</div>
+              <div
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontSize: 22,
+                  fontWeight: 800,
+                  color: s.color,
+                }}
+              >
+                {s.value}
+              </div>
+              <div
+                style={{
+                  color: t.muted,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
+                  marginTop: 2,
+                }}
+              >
+                {s.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Search bar ── */}
+      <div style={{ position: "relative", maxWidth: 320, marginBottom: 16 }}>
+        <span
+          style={{
+            position: "absolute",
+            left: 11,
+            top: "50%",
+            transform: "translateY(-50%)",
+            opacity: 0.4,
+            fontSize: 15,
+            pointerEvents: "none",
+          }}
+        >
+          🔍
+        </span>
+        <input
+          type="text"
+          placeholder="Search codes…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            background: t.surface,
+            border: `1px solid ${t.border2}`,
+            borderRadius: 10,
+            padding: "9px 12px 9px 34px",
+            color: t.text,
+            fontSize: 13,
+            outline: "none",
+            fontFamily: "'Lato',sans-serif",
+          }}
+        />
+      </div>
+
+      {/* ── Table ── */}
+      {loading ? (
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 14,
+            overflow: "hidden",
+          }}
+        >
+          {[1, 2, 3].map((k) => (
+            <div
+              key={k}
+              style={{
+                padding: "16px 20px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                gap: 16,
+              }}
+            >
+              {[140, 80, 100, 80, 70].map((w, i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: 13,
+                    width: w,
+                    background: t.surface2,
+                    borderRadius: 6,
+                  }}
+                  className="animate-pulse"
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : filteredDiscounts.length === 0 ? (
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 14,
+            padding: "60px 20px",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 48, opacity: 0.2, marginBottom: 12 }}>🏷️</div>
+          <p
+            style={{ color: t.text, fontWeight: 700, fontSize: 15, margin: 0 }}
+          >
+            {search ? "No codes match your search" : "No discount codes yet"}
+          </p>
+          <p style={{ color: t.muted, fontSize: 13, marginTop: 6 }}>
+            {search
+              ? "Try a different search term."
+              : "Click '+ New Discount Code' to create your first one."}
+          </p>
+        </div>
+      ) : (
+        <div
+          style={{
+            overflowX: "auto",
+            borderRadius: 14,
+            border: `1px solid ${t.border}`,
+            background: t.surface,
+          }}
+        >
+          <table className="disc-table">
+            <thead
+              style={{
+                background: t.surface2,
+                borderBottom: `2px solid ${t.border2}`,
+              }}
+            >
+              <tr>
+                {[
+                  "Code",
+                  "Type",
+                  "Value",
+                  "Min Order",
+                  "Max Order",
+                  "Availability",
+                  "Expiry",
+                  "Status",
+                  "Uses/Cust",
+                  "Redemptions",
+                  "Sales",
+                  "Actions",
+                ].map((h) => (
+                  <th key={h} style={{ color: t.subtle }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDiscounts.map((d, i) => {
+                const status = effectiveStatus(d);
+                const sm = statusMeta[status];
+                const reds = d.Discount_Redemptions || [];
+                const totalSaved = reds.reduce(
+                  (s, r) => s + Number(r.amount_saved || 0),
+                  0,
+                );
+                return (
+                  <tr
+                    key={d.id}
+                    style={{
+                      background: i % 2 === 0 ? t.surface : t.surface2 + "88",
+                      borderBottomColor: t.border,
+                    }}
+                  >
+                    {/* Code */}
+                    <td>
+                      <span
+                        style={{
+                          fontFamily: "'Cormorant Garamond',serif",
+                          fontWeight: 800,
+                          fontSize: 16,
+                          color: t.text,
+                          letterSpacing: ".04em",
+                        }}
+                      >
+                        {d.code}
+                      </span>
+                    </td>
+                    {/* Type */}
+                    <td>
+                      <span
+                        style={{
+                          background:
+                            d.type === "percentage" ? "#ede9fe" : "#dcfce7",
+                          color:
+                            d.type === "percentage" ? "#6d28d9" : "#15803d",
+                          border: `1px solid ${d.type === "percentage" ? "#ddd6fe" : "#bbf7d0"}`,
+                          borderRadius: 999,
+                          padding: "3px 10px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {d.type === "percentage" ? "%" : "KD"}{" "}
+                        {d.type === "percentage" ? "Percent" : "Fixed"}
+                      </span>
+                    </td>
+                    {/* Value */}
+                    <td
+                      style={{
+                        color: t.accent,
+                        fontFamily: "'Cormorant Garamond',serif",
+                        fontWeight: 800,
+                        fontSize: 16,
+                      }}
+                    >
+                      {discountLabel(d)}
+                    </td>
+                    {/* Min Order */}
+                    <td style={{ color: t.subtle, fontSize: 12 }}>
+                      {d.min_order
+                        ? `KD ${Number(d.min_order).toFixed(3)}`
+                        : "—"}
+                    </td>
+                    {/* Max Order */}
+                    <td style={{ color: t.subtle, fontSize: 12 }}>
+                      {d.max_order
+                        ? `KD ${Number(d.max_order).toFixed(3)}`
+                        : "—"}
+                    </td>
+                    {/* Availability */}
+                    <td
+                      style={{
+                        color: t.subtle,
+                        fontSize: 12,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {d.avail_from ? fmtDate(d.avail_from) : "Immediately"}
+                    </td>
+                    {/* Expiry */}
+                    <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                      {d.expiry_date ? (
+                        <span
+                          style={{
+                            color: isExpired(d) ? "#b91c1c" : t.text,
+                            fontWeight: isExpired(d) ? 700 : 400,
+                          }}
+                        >
+                          {isExpired(d) ? "⚠ " : ""}
+                          {fmtDate(d.expiry_date)}
+                        </span>
+                      ) : (
+                        <span style={{ color: t.muted }}>Never</span>
+                      )}
+                    </td>
+                    {/* Status toggle */}
+                    <td>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <label
+                          className="disc-toggle"
+                          title={
+                            isExpired(d) && !d.is_active
+                              ? "Edit expiry date first"
+                              : ""
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={d.is_active}
+                            onChange={() => toggleActive(d)}
+                          />
+                          <div
+                            className="disc-toggle-track"
+                            style={{
+                              background: d.is_active ? t.accent : t.toggleOff,
+                            }}
+                          />
+                          <div
+                            className="disc-toggle-thumb"
+                            style={{
+                              transform: d.is_active
+                                ? "translateX(19px)"
+                                : "translateX(0)",
+                            }}
+                          />
+                        </label>
+                        <span
+                          style={{
+                            background: sm.bg,
+                            color: sm.color,
+                            border: `1px solid ${sm.border}`,
+                            borderRadius: 999,
+                            padding: "2px 9px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {sm.label}
+                        </span>
+                      </div>
+                    </td>
+                    {/* Max uses per customer */}
+                    <td
+                      style={{
+                        color: t.text,
+                        fontWeight: 700,
+                        textAlign: "center",
+                      }}
+                    >
+                      {d.max_uses_per_customer}
+                    </td>
+                    {/* Redemptions */}
+                    <td>
+                      <button
+                        onClick={() => openRedemptions(d)}
+                        style={{
+                          background: t.accentBg,
+                          border: `1px solid ${t.accentBorder}`,
+                          color: t.accent,
+                          borderRadius: 8,
+                          padding: "5px 10px",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          fontFamily: "'Lato',sans-serif",
+                        }}
+                      >
+                        {reds.length} uses
+                      </button>
+                    </td>
+                    {/* Sales */}
+                    <td
+                      style={{
+                        color: t.green,
+                        fontFamily: "'Cormorant Garamond',serif",
+                        fontWeight: 800,
+                        fontSize: 15,
+                      }}
+                    >
+                      KD {totalSaved.toFixed(3)}
+                    </td>
+                    {/* Actions */}
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => openEdit(d)}
+                          style={{
+                            background: t.surface2,
+                            border: `1px solid ${t.border2}`,
+                            borderRadius: 8,
+                            width: 30,
+                            height: 30,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: t.subtle,
+                            fontSize: 14,
+                          }}
+                          title="Edit"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => deleteDiscount(d)}
+                          style={{
+                            background: "#fef2f2",
+                            border: "1px solid #fecaca",
+                            borderRadius: 8,
+                            width: 30,
+                            height: 30,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#b91c1c",
+                            fontSize: 14,
+                          }}
+                          title="Delete"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Create/Edit Modal ── */}
+      {modalOpen && (
+        <div
+          className="disc-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setModalOpen(false);
+          }}
+        >
+          <div
+            className="disc-modal disc-modal-anim"
+            style={{ background: t.surface, border: `1px solid ${t.border}` }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: "20px 24px 16px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  color: t.text,
+                  fontSize: 22,
+                  fontWeight: 800,
+                  margin: 0,
+                }}
+              >
+                {editing ? "Edit Discount Code" : "New Discount Code"}
+              </h2>
+              <button
+                onClick={() => setModalOpen(false)}
+                style={{
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                  color: t.subtle,
+                  fontSize: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+              {modalErr && (
+                <div
+                  style={{
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    color: "#b91c1c",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    marginBottom: 16,
+                    fontWeight: 500,
+                  }}
+                >
+                  ⚠️ {modalErr}
+                </div>
+              )}
+
+              {/* Code */}
+              <div style={{ marginBottom: 16 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: t.subtle,
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Discount Code *
+                </label>
+                <input
+                  className="disc-inp"
+                  placeholder="e.g. SAVE20 or WELCOME"
+                  value={form.code}
+                  onChange={(e) => setF("code", e.target.value.toUpperCase())}
+                  style={{
+                    background: t.surface2,
+                    border: `1.5px solid ${t.border2}`,
+                    color: t.text,
+                    fontFamily: "'Cormorant Garamond',serif",
+                    fontWeight: 700,
+                    fontSize: 16,
+                    letterSpacing: ".06em",
+                  }}
+                />
+              </div>
+
+              {/* Type + Value side by side */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Discount Type *
+                  </label>
+                  <select
+                    className="disc-select"
+                    value={form.type}
+                    onChange={(e) => setF("type", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount (KD)</option>
+                  </select>
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Value *{" "}
+                    {form.type === "percentage"
+                      ? "(e.g. 20 for 20%)"
+                      : "(e.g. 1.500 for KD 1.500)"}
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="number"
+                    min="0"
+                    step={form.type === "percentage" ? "1" : "0.001"}
+                    placeholder={form.type === "percentage" ? "20" : "1.500"}
+                    value={form.value}
+                    onChange={(e) => setF("value", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Min / Max order */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Min. Order (KD) *
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder="e.g. 3.000"
+                    value={form.min_order}
+                    onChange={(e) => setF("min_order", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Max. Order (KD){" "}
+                    <span
+                      style={{
+                        textTransform: "none",
+                        fontWeight: 400,
+                        color: t.muted,
+                      }}
+                    >
+                      optional
+                    </span>
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder="Leave blank for no max"
+                    value={form.max_order}
+                    onChange={(e) => setF("max_order", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Avail from / Expiry */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Available From{" "}
+                    <span
+                      style={{
+                        textTransform: "none",
+                        fontWeight: 400,
+                        color: t.muted,
+                      }}
+                    >
+                      optional
+                    </span>
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="date"
+                    value={form.avail_from}
+                    onChange={(e) => setF("avail_from", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Expiry Date{" "}
+                    <span
+                      style={{
+                        textTransform: "none",
+                        fontWeight: 400,
+                        color: t.muted,
+                      }}
+                    >
+                      optional
+                    </span>
+                  </label>
+                  <input
+                    className="disc-inp"
+                    type="date"
+                    value={form.expiry_date}
+                    onChange={(e) => setF("expiry_date", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Max uses per customer */}
+              <div style={{ marginBottom: 16 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: t.subtle,
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Max Uses Per Customer *
+                </label>
+                <input
+                  className="disc-inp"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="1"
+                  value={form.max_uses_per_customer}
+                  onChange={(e) =>
+                    setF("max_uses_per_customer", e.target.value)
+                  }
+                  style={{
+                    background: t.surface2,
+                    border: `1.5px solid ${t.border2}`,
+                    color: t.text,
+                    maxWidth: 120,
+                  }}
+                />
+                <p style={{ color: t.muted, fontSize: 11, marginTop: 5 }}>
+                  Each customer can use this code this many times. Set to 1 for
+                  single-use per customer.
+                </p>
+              </div>
+
+              {/* Active toggle */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "14px 16px",
+                  background: t.surface2,
+                  borderRadius: 12,
+                  border: `1px solid ${t.border}`,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <p
+                    style={{
+                      color: t.text,
+                      fontWeight: 700,
+                      fontSize: 13,
+                      margin: 0,
+                    }}
+                  >
+                    Active
+                  </p>
+                  <p
+                    style={{ color: t.muted, fontSize: 11, margin: "3px 0 0" }}
+                  >
+                    Customers can use this code when active.
+                  </p>
+                </div>
+                <label className="disc-toggle">
+                  <input
+                    type="checkbox"
+                    checked={form.is_active}
+                    onChange={(e) => setF("is_active", e.target.checked)}
+                  />
+                  <div
+                    className="disc-toggle-track"
+                    style={{
+                      background: form.is_active ? t.accent : t.toggleOff,
+                    }}
+                  />
+                  <div
+                    className="disc-toggle-thumb"
+                    style={{
+                      transform: form.is_active
+                        ? "translateX(19px)"
+                        : "translateX(0)",
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderTop: `1px solid ${t.border}`,
+                display: "flex",
+                gap: 10,
+                flexShrink: 0,
+              }}
+            >
+              <button
+                onClick={() => setModalOpen(false)}
+                style={{
+                  flex: 1,
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: 12,
+                  padding: "12px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: t.subtle,
+                  cursor: "pointer",
+                  fontFamily: "'Lato',sans-serif",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                style={{
+                  flex: 2,
+                  background: t.accent,
+                  border: "none",
+                  borderRadius: 12,
+                  padding: "12px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#fff",
+                  cursor: saving ? "not-allowed" : "pointer",
+                  opacity: saving ? 0.7 : 1,
+                  fontFamily: "'Lato',sans-serif",
+                }}
+              >
+                {saving ? "Saving…" : editing ? "Save Changes" : "Create Code"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Redemptions Drawer ── */}
+      {redeemDisc && (
+        <div
+          className="disc-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRedeemDisc(null);
+          }}
+        >
+          <div
+            className="disc-modal disc-modal-anim"
+            style={{ background: t.surface, border: `1px solid ${t.border}` }}
+          >
+            <div
+              style={{
+                padding: "20px 24px 16px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+              }}
+            >
+              <div>
+                <h2
+                  style={{
+                    fontFamily: "'Cormorant Garamond',serif",
+                    color: t.text,
+                    fontSize: 20,
+                    fontWeight: 800,
+                    margin: "0 0 2px",
+                  }}
+                >
+                  Redemptions —{" "}
+                  <span style={{ color: t.accent }}>{redeemDisc.code}</span>
+                </h2>
+                <p style={{ color: t.muted, fontSize: 12, margin: 0 }}>
+                  {discountLabel(redeemDisc)} · max{" "}
+                  {redeemDisc.max_uses_per_customer} use
+                  {redeemDisc.max_uses_per_customer !== 1 ? "s" : ""}/customer
+                </p>
+              </div>
+              <button
+                onClick={() => setRedeemDisc(null)}
+                style={{
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                  color: t.subtle,
+                  fontSize: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ padding: "16px 24px", overflowY: "auto", flex: 1 }}>
+              {redeemLoading ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "32px 0",
+                    color: t.muted,
+                  }}
+                >
+                  Loading…
+                </div>
+              ) : redemptions.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 0" }}>
+                  <div style={{ fontSize: 40, opacity: 0.2, marginBottom: 10 }}>
+                    🔄
+                  </div>
+                  <p style={{ color: t.muted, fontSize: 14 }}>
+                    No redemptions yet for this code.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      marginBottom: 18,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: t.accentBg,
+                        border: `1px solid ${t.accentBorder}`,
+                        borderRadius: 10,
+                        padding: "10px 16px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: t.accent,
+                          fontFamily: "'Cormorant Garamond',serif",
+                          fontWeight: 800,
+                          fontSize: 20,
+                        }}
+                      >
+                        {redemptions.length}
+                      </div>
+                      <div
+                        style={{
+                          color: t.muted,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Total Uses
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        background: t.greenBg,
+                        border: `1px solid ${t.greenBorder}`,
+                        borderRadius: 10,
+                        padding: "10px 16px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: t.green,
+                          fontFamily: "'Cormorant Garamond',serif",
+                          fontWeight: 800,
+                          fontSize: 20,
+                        }}
+                      >
+                        KD{" "}
+                        {redemptions
+                          .reduce((s, r) => s + Number(r.amount_saved || 0), 0)
+                          .toFixed(3)}
+                      </div>
+                      <div
+                        style={{
+                          color: t.muted,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Total Saved
+                      </div>
+                    </div>
+                  </div>
+                  {redemptions.map((r, i) => (
+                    <div
+                      key={r.id}
+                      className="disc-redemption-row"
+                      style={{ borderBottomColor: t.border }}
+                    >
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          background: t.accentBg,
+                          border: `1px solid ${t.accentBorder}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: t.accent,
+                          fontWeight: 800,
+                          fontSize: 13,
+                          fontFamily: "'Cormorant Garamond',serif",
+                        }}
+                      >
+                        {(r.Customer?.cust_name || "?")[0].toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p
+                          style={{
+                            color: t.text,
+                            fontWeight: 700,
+                            fontSize: 13,
+                            margin: "0 0 2px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {r.Customer?.cust_name || "Unknown Customer"}
+                        </p>
+                        <p style={{ color: t.muted, fontSize: 11, margin: 0 }}>
+                          {r.Customer?.ph_num || ""} · Order #
+                          {r.order_id || "—"} · {fmtDate(r.created_at)}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div
+                          style={{
+                            color: t.green,
+                            fontFamily: "'Cormorant Garamond',serif",
+                            fontWeight: 800,
+                            fontSize: 15,
+                          }}
+                        >
+                          −KD {Number(r.amount_saved || 0).toFixed(3)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Orders Page ──────────────────────────────────────────────────────────────
 // ─── Orders helpers ───────────────────────────────────────────────────────────
 const fmtKD = (n) => `KD ${Number(n || 0).toFixed(3)}`;
@@ -3844,7 +5584,7 @@ function OrdersPage({ t, user }) {
   const [orderItems, setOrderItems] = useState([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [deliveryAddr, setDeliveryAddr] = useState(null); // fetched separately
-  const [orderDiscount, setOrderDiscount] = useState(null); // {code,type,value,amount_saved} | null
+  const [orderDiscount, setOrderDiscount] = useState(null);
   const [mobileView, setMobileView] = useState("list");
 
   // Action modals
@@ -9116,6 +10856,8 @@ export default function Dashboard({ user, onLogout }) {
         return <CustomersPage t={t} user={user} />;
       case "menu":
         return <MenuPage t={t} user={user} />;
+      case "discounts":
+        return <DiscountsPage t={t} user={user} />;
       default:
         return (
           <div className="p-8 flex items-center justify-center min-h-[50vh]">
