@@ -1533,12 +1533,25 @@ function CartSheet({
   onClose,
   note,
   onNoteChange,
+  appliedDiscount,
+  onApplyDiscount,
+  customer,
+  restId,
 }) {
-  const { subT, delivery, total } = calcTotals(cart, addonCart);
+  const { subT, delivery, total, discountAmt } = calcTotals(
+    cart,
+    addonCart,
+    appliedDiscount,
+  );
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
     cart.reduce((s, c) => s + c.qty, 0) +
     addonCart.reduce((s, a) => s + a.qty, 0);
+
+  const [codeInput, setCodeInput] = useState(appliedDiscount?.code || "");
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [codeErr, setCodeErr] = useState("");
+  const [codeOk, setCodeOk] = useState(!!appliedDiscount);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -1546,6 +1559,87 @@ function CartSheet({
       document.body.style.overflow = "";
     };
   }, []);
+
+  const applyCode = async () => {
+    const code = codeInput.trim().toUpperCase();
+    if (!code) {
+      setCodeErr("Please enter a discount code.");
+      return;
+    }
+    if (!customer) {
+      setCodeErr("You must be logged in to apply a discount.");
+      return;
+    }
+    setCodeLoading(true);
+    setCodeErr("");
+    setCodeOk(false);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("Discounts")
+        .select("*")
+        .eq("rest_id", restId)
+        .eq("code", code)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        setCodeErr("Invalid or inactive discount code.");
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.avail_from && data.avail_from > today) {
+        setCodeErr(`This code is not valid until ${data.avail_from}.`);
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.expiry_date && data.expiry_date < today) {
+        setCodeErr("This discount code has expired.");
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.min_order && subT < Number(data.min_order)) {
+        setCodeErr(
+          `Minimum order of KD ${Number(data.min_order).toFixed(3)} required for this code.`,
+        );
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.max_order && subT > Number(data.max_order)) {
+        setCodeErr(
+          `This code only applies to orders up to KD ${Number(data.max_order).toFixed(3)}.`,
+        );
+        onApplyDiscount(null);
+        return;
+      }
+      // Check per-customer usage
+      const { count } = await supabase
+        .from("Discount_Redemptions")
+        .select("id", { count: "exact", head: true })
+        .eq("discount_id", data.id)
+        .eq("cust_id", customer.id);
+      if (count >= data.max_uses_per_customer) {
+        setCodeErr(
+          `You have already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`,
+        );
+        onApplyDiscount(null);
+        return;
+      }
+      onApplyDiscount(data);
+      setCodeOk(true);
+    } catch (e) {
+      setCodeErr("Failed to validate code. Please try again.");
+    } finally {
+      setCodeLoading(false);
+    }
+  };
+
+  const removeCode = () => {
+    setCodeInput("");
+    setCodeOk(false);
+    setCodeErr("");
+    onApplyDiscount(null);
+  };
 
   return (
     <>
@@ -1589,7 +1683,6 @@ function CartSheet({
                   Menu items
                 </p>
                 {cart.map((c, i) => {
-                  // Show option names only (no group name prefix)
                   const varLines = Object.values(c.variantMeta || {})
                     .flatMap((m) => m.optionNames)
                     .filter(Boolean);
@@ -1605,7 +1698,6 @@ function CartSheet({
                         >
                           {c.item.name}
                         </p>
-                        {/* Variant option names */}
                         {varLines.length > 0 && (
                           <p className="cart-detail">
                             {varLines.map((v, vi) => (
@@ -1621,7 +1713,6 @@ function CartSheet({
                             ))}
                           </p>
                         )}
-                        {/* Per-item special instruction */}
                         {c.note && (
                           <p className="cart-note" style={{ marginTop: 3 }}>
                             📝 {c.note}
@@ -1729,6 +1820,113 @@ function CartSheet({
               />
             </div>
 
+            {/* ── Discount code input ── */}
+            <div style={{ marginBottom: 14 }}>
+              <label className="lbl">
+                Discount code{" "}
+                <span
+                  style={{
+                    textTransform: "none",
+                    fontWeight: 400,
+                    color: "var(--t3)",
+                  }}
+                >
+                  (optional)
+                </span>
+              </label>
+              {codeOk && appliedDiscount ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    borderRadius: "var(--r-sm)",
+                    padding: "10px 14px",
+                  }}
+                >
+                  <span style={{ fontSize: 18 }}>🎉</span>
+                  <div style={{ flex: 1 }}>
+                    <p
+                      style={{
+                        fontWeight: 800,
+                        color: "#15803d",
+                        fontSize: 13,
+                        margin: 0,
+                      }}
+                    >
+                      {appliedDiscount.code}
+                    </p>
+                    <p
+                      style={{
+                        color: "#166534",
+                        fontSize: 12,
+                        margin: "2px 0 0",
+                      }}
+                    >
+                      {appliedDiscount.type === "percentage"
+                        ? `${appliedDiscount.value}% off`
+                        : `KD ${Number(appliedDiscount.value).toFixed(3)} off`}{" "}
+                      applied!
+                    </p>
+                  </div>
+                  <button
+                    onClick={removeCode}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#15803d",
+                      fontSize: 18,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="inp"
+                    style={{
+                      flex: 1,
+                      textTransform: "uppercase",
+                      fontWeight: 700,
+                      letterSpacing: ".04em",
+                    }}
+                    placeholder="Enter code…"
+                    value={codeInput}
+                    onChange={(e) => {
+                      setCodeInput(e.target.value.toUpperCase());
+                      setCodeErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && applyCode()}
+                  />
+                  <button
+                    className="btn-out"
+                    onClick={applyCode}
+                    disabled={codeLoading}
+                    style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+                  >
+                    {codeLoading ? "…" : "Apply"}
+                  </button>
+                </div>
+              )}
+              {codeErr && (
+                <p
+                  style={{
+                    color: "var(--red)",
+                    fontSize: 12,
+                    marginTop: 6,
+                    fontWeight: 500,
+                  }}
+                >
+                  ⚠️ {codeErr}
+                </p>
+              )}
+            </div>
+
             {/* ── Bill summary ── */}
             <div
               style={{
@@ -1746,6 +1944,15 @@ function CartSheet({
                 <span>Delivery fee</span>
                 <span>{fmt(delivery)}</span>
               </div>
+              {discountAmt > 0 && (
+                <div
+                  className="sum-row"
+                  style={{ color: "#15803d", fontWeight: 700 }}
+                >
+                  <span>🏷 Discount ({appliedDiscount?.code})</span>
+                  <span>−{fmt(discountAmt)}</span>
+                </div>
+              )}
               <div
                 style={{
                   borderTop: "1px solid var(--border)",
@@ -1806,6 +2013,9 @@ function CheckoutSheet({
   onClose,
   onPlaceOrder,
   onAddAddress,
+  appliedDiscount,
+  discountAmt,
+  subTotal,
 }) {
   const [selAddr, setSelAddr] = useState(defaultAddr?.id || null);
   const [pay, setPay] = useState("Cash");
@@ -1928,7 +2138,7 @@ function CheckoutSheet({
             </div>
           </div>
 
-          {/* Notes — show the special instructions from cart if any */}
+          {/* Notes */}
           {cartNote ? (
             <div style={{ marginBottom: 22 }}>
               <label className="lbl">Special instructions</label>
@@ -1948,20 +2158,95 @@ function CheckoutSheet({
             </div>
           ) : null}
 
-          {/* Total */}
+          {/* Applied discount badge */}
+          {appliedDiscount && discountAmt > 0 && (
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1px solid #86efac",
+                borderRadius: var_r_sm,
+                padding: "10px 14px",
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <span style={{ fontSize: 18 }}>🏷️</span>
+              <div style={{ flex: 1 }}>
+                <p
+                  style={{
+                    fontWeight: 800,
+                    color: "#15803d",
+                    fontSize: 13,
+                    margin: 0,
+                  }}
+                >
+                  Code "{appliedDiscount.code}" applied
+                </p>
+                <p
+                  style={{ color: "#166534", fontSize: 12, margin: "2px 0 0" }}
+                >
+                  You save {fmt(discountAmt)} on this order
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Total summary */}
           <div
             style={{
               background: "#fafafa",
               borderRadius: var_r_sm,
               padding: "13px 16px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
               marginBottom: 16,
             }}
           >
-            <span style={{ fontWeight: 600 }}>Total to pay</span>
-            <span style={{ fontSize: 18, fontWeight: 800 }}>{fmt(total)}</span>
+            {subTotal != null && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                  color: "var(--t2)",
+                  marginBottom: 6,
+                }}
+              >
+                <span>Subtotal</span>
+                <span>{fmt(subTotal)}</span>
+              </div>
+            )}
+            {appliedDiscount && discountAmt > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                  color: "#15803d",
+                  fontWeight: 700,
+                  marginBottom: 6,
+                }}
+              >
+                <span>🏷 Discount</span>
+                <span>−{fmt(discountAmt)}</span>
+              </div>
+            )}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                borderTop:
+                  subTotal != null ? "1px solid var(--border)" : "none",
+                paddingTop: subTotal != null ? 10 : 0,
+                marginTop: subTotal != null ? 6 : 0,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>Total to pay</span>
+              <span style={{ fontSize: 18, fontWeight: 800 }}>
+                {fmt(total)}
+              </span>
+            </div>
           </div>
 
           <button
@@ -3142,12 +3427,105 @@ function DesktopCart({
   onCheckout,
   note,
   onNoteChange,
+  appliedDiscount,
+  onApplyDiscount,
+  customer,
+  restId,
 }) {
-  const { subT, delivery, total } = calcTotals(cart, addonCart);
+  const { subT, delivery, total, discountAmt } = calcTotals(
+    cart,
+    addonCart,
+    appliedDiscount,
+  );
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
     cart.reduce((s, c) => s + c.qty, 0) +
     (addonCart || []).reduce((s, a) => s + a.qty, 0);
+
+  const [codeInput, setCodeInput] = useState(appliedDiscount?.code || "");
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [codeErr, setCodeErr] = useState("");
+  const [codeOk, setCodeOk] = useState(!!appliedDiscount);
+
+  const applyCode = async () => {
+    const code = codeInput.trim().toUpperCase();
+    if (!code) {
+      setCodeErr("Please enter a discount code.");
+      return;
+    }
+    if (!customer) {
+      setCodeErr("Log in to apply a discount.");
+      return;
+    }
+    setCodeLoading(true);
+    setCodeErr("");
+    setCodeOk(false);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("Discounts")
+        .select("*")
+        .eq("rest_id", restId)
+        .eq("code", code)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        setCodeErr("Invalid or inactive discount code.");
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.avail_from && data.avail_from > today) {
+        setCodeErr(`Valid from ${data.avail_from}.`);
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.expiry_date && data.expiry_date < today) {
+        setCodeErr("This code has expired.");
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.min_order && subT < Number(data.min_order)) {
+        setCodeErr(
+          `Min. order KD ${Number(data.min_order).toFixed(3)} required.`,
+        );
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.max_order && subT > Number(data.max_order)) {
+        setCodeErr(
+          `Code only valid up to KD ${Number(data.max_order).toFixed(3)}.`,
+        );
+        onApplyDiscount(null);
+        return;
+      }
+      const { count } = await supabase
+        .from("Discount_Redemptions")
+        .select("id", { count: "exact", head: true })
+        .eq("discount_id", data.id)
+        .eq("cust_id", customer.id);
+      if (count >= data.max_uses_per_customer) {
+        setCodeErr(
+          `You've already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`,
+        );
+        onApplyDiscount(null);
+        return;
+      }
+      onApplyDiscount(data);
+      setCodeOk(true);
+    } catch (e) {
+      setCodeErr("Failed to validate code.");
+    } finally {
+      setCodeLoading(false);
+    }
+  };
+
+  const removeCode = () => {
+    setCodeInput("");
+    setCodeOk(false);
+    setCodeErr("");
+    onApplyDiscount(null);
+  };
 
   return (
     <div
@@ -3355,6 +3733,109 @@ function DesktopCart({
               />
             </div>
 
+            {/* Discount code */}
+            <div style={{ marginBottom: 12 }}>
+              <label className="lbl" style={{ fontSize: 10 }}>
+                Discount code{" "}
+                <span style={{ textTransform: "none", fontWeight: 400 }}>
+                  (optional)
+                </span>
+              </label>
+              {codeOk && appliedDiscount ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    borderRadius: var_r_sm,
+                    padding: "8px 12px",
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>🎉</span>
+                  <div style={{ flex: 1 }}>
+                    <p
+                      style={{
+                        fontWeight: 800,
+                        color: "#15803d",
+                        fontSize: 12,
+                        margin: 0,
+                      }}
+                    >
+                      {appliedDiscount.code} applied!
+                    </p>
+                    <p
+                      style={{
+                        color: "#166534",
+                        fontSize: 11,
+                        margin: "1px 0 0",
+                      }}
+                    >
+                      {appliedDiscount.type === "percentage"
+                        ? `${appliedDiscount.value}%`
+                        : `KD ${Number(appliedDiscount.value).toFixed(3)}`}{" "}
+                      off
+                    </p>
+                  </div>
+                  <button
+                    onClick={removeCode}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#15803d",
+                      fontSize: 16,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    className="inp"
+                    style={{
+                      flex: 1,
+                      fontSize: 12,
+                      padding: "8px 10px",
+                      textTransform: "uppercase",
+                      fontWeight: 700,
+                      letterSpacing: ".04em",
+                    }}
+                    placeholder="Enter code…"
+                    value={codeInput}
+                    onChange={(e) => {
+                      setCodeInput(e.target.value.toUpperCase());
+                      setCodeErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && applyCode()}
+                  />
+                  <button
+                    className="btn-out"
+                    onClick={applyCode}
+                    disabled={codeLoading}
+                    style={{ flexShrink: 0, fontSize: 12, padding: "8px 12px" }}
+                  >
+                    {codeLoading ? "…" : "Apply"}
+                  </button>
+                </div>
+              )}
+              {codeErr && (
+                <p
+                  style={{
+                    color: "var(--red)",
+                    fontSize: 11,
+                    marginTop: 5,
+                    fontWeight: 500,
+                  }}
+                >
+                  ⚠️ {codeErr}
+                </p>
+              )}
+            </div>
+
             {/* Bill */}
             <div
               style={{
@@ -3372,6 +3853,15 @@ function DesktopCart({
                 <span>Delivery</span>
                 <span>{fmt(delivery)}</span>
               </div>
+              {discountAmt > 0 && (
+                <div
+                  className="sum-row"
+                  style={{ fontSize: 13, color: "#15803d", fontWeight: 700 }}
+                >
+                  <span>🏷 Discount</span>
+                  <span>−{fmt(discountAmt)}</span>
+                </div>
+              )}
               <div
                 style={{
                   borderTop: "1px solid var(--border)",
@@ -3453,6 +3943,9 @@ export default function Customer() {
   const [checkoutTotal, setCheckoutTotal] = useState(0);
   const [cartNote, setCartNote] = useState("");
   const [lastOrder, setLastOrder] = useState(null);
+
+  /* discount */
+  const [appliedDiscount, setAppliedDiscount] = useState(null); // the validated Discount row
   const [customizeItem, setCustomizeItem] = useState(null);
 
   /* active tab for bottom bar */
@@ -3763,7 +4256,7 @@ export default function Customer() {
   const cartCount = cart.reduce((s, c) => s + c.qty, 0) + addonCartCount;
 
   /* total = menu items + add-ons + delivery (no VAT) */
-  const calcTotals = (cartItems, addonCartItems) => {
+  const calcTotals = (cartItems, addonCartItems, appliedDiscount) => {
     const menuSub = cartItems.reduce((s, c) => s + c.unitPrice * c.qty, 0);
     const addonSub = addonCartItems.reduce(
       (s, a) => s + +a.addon.price * a.qty,
@@ -3771,13 +4264,30 @@ export default function Customer() {
     );
     const subT = menuSub + addonSub;
     const delivery = subT > 0 ? 0.5 : 0;
-    return { menuSub, addonSub, subT, delivery, total: subT + delivery };
+    let discountAmt = 0;
+    if (appliedDiscount && subT > 0) {
+      if (appliedDiscount.type === "percentage") {
+        discountAmt = (subT * Number(appliedDiscount.value)) / 100;
+      } else {
+        discountAmt = Number(appliedDiscount.value);
+      }
+      discountAmt = Math.min(discountAmt, subT);
+    }
+    const discountedSubT = subT - discountAmt;
+    return {
+      menuSub,
+      addonSub,
+      subT,
+      delivery,
+      discountAmt,
+      total: discountedSubT + delivery,
+    };
   };
 
   /* place order — writes Orders + Order_Items + Order_Item_Variants + Order_Item_AddOns */
   const placeOrder = async ({ address, payMethod, notes }) => {
     if (!customer || !restaurant) return;
-    const { total } = calcTotals(cart, addonCart);
+    const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
     try {
       // 1. Create the order header
       const { data: order, error: oe } = await supabase
@@ -3817,12 +4327,10 @@ export default function Customer() {
         for (const [, val] of Object.entries(selVars)) {
           const ids = Array.isArray(val) ? val : val ? [val] : [];
           for (const optId of ids) {
-            // Find price_adj from variantMeta (we stored option names but not price_adj — fetch it)
-            // Use price_adj = unitPrice diff / quantity as approximation, or 0 if unavailable
             await supabase.from("Order_Item_Variants").insert({
               order_item_id: oi.id,
               variant_opt_id: optId,
-              price_adj: 0, // Will be correct once fetched; acceptable for now
+              price_adj: 0,
             });
           }
         }
@@ -3835,7 +4343,7 @@ export default function Customer() {
           .from("Order_Items")
           .insert({
             order_id: order.id,
-            menu_id: 0, // Add-ons don't have menu_id; use 0 as sentinel or NULL if schema allows
+            menu_id: 0,
             quantity: a.qty,
             unit_price: +a.addon.price,
             subtotal,
@@ -3843,7 +4351,6 @@ export default function Customer() {
           })
           .select()
           .single();
-        // If menu_id FK fails, skip silently (add-ons are also logged separately)
         if (!oiErr && oi) {
           await supabase.from("Order_Item_AddOns").insert({
             order_item_id: oi.id,
@@ -3854,7 +4361,17 @@ export default function Customer() {
         }
       }
 
-      // 5. Update customer totals
+      // 5. Record discount redemption if a coupon was applied
+      if (appliedDiscount && discountAmt > 0) {
+        await supabase.from("Discount_Redemptions").insert({
+          discount_id: appliedDiscount.id,
+          cust_id: customer.id,
+          order_id: order.id,
+          amount_saved: discountAmt,
+        });
+      }
+
+      // 6. Update customer totals
       await supabase
         .from("Customer")
         .update({
@@ -3867,10 +4384,10 @@ export default function Customer() {
       setCart([]);
       setAddonCart([]);
       setCartNote("");
+      setAppliedDiscount(null);
       setShowCheckout(false);
       setShowTrack(true);
       showToast("Order placed! 🎉");
-      // Refresh order history
       loadOrderHistory(customer.id);
     } catch (e) {
       console.error("[placeOrder]", e);
@@ -4543,6 +5060,10 @@ export default function Customer() {
             calcTotals={calcTotals}
             note={cartNote}
             onNoteChange={setCartNote}
+            appliedDiscount={appliedDiscount}
+            onApplyDiscount={setAppliedDiscount}
+            customer={customer}
+            restId={restId}
             onCheckout={(t) => {
               setCheckoutTotal(t);
               setShowCheckout(true);
@@ -4614,6 +5135,10 @@ export default function Customer() {
           calcTotals={calcTotals}
           note={cartNote}
           onNoteChange={setCartNote}
+          appliedDiscount={appliedDiscount}
+          onApplyDiscount={setAppliedDiscount}
+          customer={customer}
+          restId={restId}
           onCheckout={(t, n) => {
             setCheckoutTotal(t);
             setCartNote(n || "");
@@ -4632,6 +5157,9 @@ export default function Customer() {
           defaultAddr={defaultAddr}
           onClose={() => setShowCheckout(false)}
           onPlaceOrder={placeOrder}
+          appliedDiscount={appliedDiscount}
+          discountAmt={calcTotals(cart, addonCart, appliedDiscount).discountAmt}
+          subTotal={calcTotals(cart, addonCart, appliedDiscount).subT}
           onAddAddress={() => {
             setShowCheckout(false);
             setShowProfile(true);
