@@ -2383,15 +2383,67 @@ function DeliveryPage({ t, user }) {
 }
 
 // ─── Customer Flip Card ───────────────────────────────────────────────────────
-function CustomerFlipCard({ customer, onClose, t }) {
+function CustomerFlipCard({ customer, onClose, t, restId }) {
   const [flipped, setFlipped] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [allTags, setAllTags] = useState([]);
+  const [customerTagIds, setCustomerTagIds] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [tagErr, setTagErr] = useState("");
 
   useEffect(() => {
-    // Trigger flip to back after mount
     const timer = setTimeout(() => setFlipped(true), 80);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!restId || !customer?.cust_id) {
+      setTagsLoading(false);
+      return;
+    }
+    (async () => {
+      try {
+        const [{ data: all }, { data: custT }] = await Promise.all([
+          supabase
+            .from("Tags")
+            .select("id,name,color")
+            .eq("rest_id", restId)
+            .order("name"),
+          supabase
+            .from("Customer_Tags")
+            .select("tag_id")
+            .eq("cust_id", customer.cust_id)
+            .eq("rest_id", restId),
+        ]);
+        setAllTags(all || []);
+        setCustomerTagIds((custT || []).map((r) => r.tag_id));
+      } catch {
+        /* non-critical */
+      } finally {
+        setTagsLoading(false);
+      }
+    })();
+  }, [restId, customer?.cust_id]);
+
+  const toggleTag = async (tag) => {
+    setTagErr("");
+    const isIn = customerTagIds.includes(tag.id);
+    if (isIn) {
+      const { error } = await supabase
+        .from("Customer_Tags")
+        .delete()
+        .eq("tag_id", tag.id)
+        .eq("cust_id", customer.cust_id);
+      if (!error) setCustomerTagIds((p) => p.filter((id) => id !== tag.id));
+    } else {
+      const { error } = await supabase
+        .from("Customer_Tags")
+        .insert({ tag_id: tag.id, cust_id: customer.cust_id, rest_id: restId });
+      if (!error) setCustomerTagIds((p) => [...p, tag.id]);
+      else if (!error?.message?.includes("unique"))
+        setTagErr("Failed to add tag.");
+    }
+  };
 
   const handleClose = () => {
     setFlipped(false);
@@ -2438,13 +2490,13 @@ function CustomerFlipCard({ customer, onClose, t }) {
     >
       <style>{`
         .cust-flip-scene {
-          width: 340px;
+          width: 360px;
           max-width: 100%;
-          height: 420px;
+          height: 530px;
           perspective: 1200px;
         }
         @media (max-width: 400px) {
-          .cust-flip-scene { height: 460px; }
+          .cust-flip-scene { height: 570px; width: 100%; }
         }
         .cust-flip-card {
           width: 100%;
@@ -2714,6 +2766,64 @@ function CustomerFlipCard({ customer, onClose, t }) {
                   )}
                 </div>
               ))}
+
+              {/* Tags — inside scrollable stats container */}
+              <div style={{ paddingTop: 12, marginTop: 2 }}>
+                <p
+                  style={{
+                    color: t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  Audience Tags
+                </p>
+                {tagsLoading ? (
+                  <p style={{ color: t.muted, fontSize: 12 }}>Loading…</p>
+                ) : allTags.length === 0 ? (
+                  <p style={{ color: t.muted, fontSize: 12 }}>
+                    No tags yet. Go to Broadcast to create tags.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {allTags.map((tag) => {
+                      const isIn = customerTagIds.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          onClick={() => toggleTag(tag)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "4px 10px",
+                            borderRadius: 99,
+                            border: `1.5px solid ${tag.color}`,
+                            background: isIn ? tag.color : "transparent",
+                            color: isIn ? "#fff" : tag.color,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            transition: "all .15s",
+                          }}
+                        >
+                          {isIn ? "✓" : "+"} {tag.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {tagErr && (
+                  <p style={{ color: t.red, fontSize: 11, marginTop: 4 }}>
+                    ⚠️ {tagErr}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Last order footer */}
@@ -3512,6 +3622,7 @@ function CustomersPage({ t, user }) {
           customer={selectedCustomer}
           onClose={() => setSelectedCustomer(null)}
           t={t}
+          restId={restId}
         />
       )}
     </div>
@@ -5252,6 +5363,3002 @@ function DiscountsPage({ t, user }) {
               )}
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Broadcast Page ────────────────────────────────────────────────────────────
+const TAG_PALETTE = [
+  "#6366F1",
+  "#C4711A",
+  "#2D7A4F",
+  "#EC4899",
+  "#14B8A6",
+  "#F59E0B",
+  "#3B82F6",
+  "#8B5CF6",
+  "#EF4444",
+  "#10B981",
+];
+
+// Special audience definitions — computed from Orders/Customer data
+const SPECIAL_AUDIENCES = [
+  {
+    id: "active",
+    name: "Active Customers",
+    icon: "⚡",
+    desc: "Ordered in last 30 days",
+    color: "#2D7A4F",
+  },
+  {
+    id: "vip",
+    name: "VIP Customers",
+    icon: "👑",
+    desc: "Top 20% by lifetime spend",
+    color: "#F59E0B",
+  },
+  {
+    id: "new",
+    name: "New Customers",
+    icon: "🌟",
+    desc: "Joined & linked in last 30 days",
+    color: "#6366F1",
+  },
+  {
+    id: "inactive",
+    name: "Inactive Customers",
+    icon: "💤",
+    desc: "No orders in 90+ days",
+    color: "#9CA3AF",
+  },
+  {
+    id: "opencart",
+    name: "Open Cart Customers",
+    icon: "🛒",
+    desc: "Linked but no order in last 7 days",
+    color: "#EC4899",
+  },
+  {
+    id: "potential",
+    name: "Potential Customers",
+    icon: "🎯",
+    desc: "Linked to restaurant, never ordered",
+    color: "#14B8A6",
+  },
+  {
+    id: "highavg",
+    name: "High Avg Spend",
+    icon: "💎",
+    desc: "Avg order value > 2× restaurant avg",
+    color: "#8B5CF6",
+  },
+  {
+    id: "repeatbuyers",
+    name: "Repeat Buyers",
+    icon: "🔄",
+    desc: "5 or more accepted orders placed",
+    color: "#3B82F6",
+  },
+];
+
+function BroadcastPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  const [activeTab, setActiveTab] = useState("audiences");
+
+  return (
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {/* Page header + tab bar */}
+      <div style={{ padding: "24px 24px 0", flexShrink: 0 }}>
+        <h1
+          style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            color: t.text,
+            fontSize: "clamp(26px,5vw,36px)",
+            fontWeight: 800,
+            margin: "0 0 20px",
+          }}
+        >
+          Broadcast
+        </h1>
+        <div
+          style={{
+            display: "flex",
+            gap: 0,
+            borderBottom: `1.5px solid ${t.border}`,
+          }}
+        >
+          {[
+            ["schedule", "Schedule Broadcast"],
+            ["audiences", "Audiences"],
+            ["members", "Audience Members"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              style={{
+                padding: "10px 20px",
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 14,
+                fontWeight: 600,
+                color: activeTab === id ? t.text : t.muted,
+                borderTop: "none",
+                borderLeft: "none",
+                borderRight: "none",
+                borderBottom:
+                  activeTab === id
+                    ? `2.5px solid ${t.text}`
+                    : "2.5px solid transparent",
+                background: "none",
+                outline: "none",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                marginBottom: -1.5,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div style={{ flex: 1, overflow: "auto" }}>
+        {activeTab === "schedule" && (
+          <ScheduleBroadcastTab t={t} restId={restId} />
+        )}
+        {activeTab === "audiences" && <AudiencesTab t={t} restId={restId} />}
+        {activeTab === "members" && (
+          <AudienceMembersTab t={t} restId={restId} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── SCHEDULE BROADCAST TAB ───────────────────────────────────────────────────
+function ScheduleBroadcastTab({ t, restId }) {
+  const [tags, setTags] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [selectedAudiences, setSelectedAudiences] = useState([]);
+  const [template, setTemplate] = useState({
+    name: "",
+    headerType: "text",
+    headerText: "",
+    headerImageUrl: "",
+    body: "",
+    footer: "Not interested? Type STOP to no longer receive updates.",
+    buttons: [""],
+    includeDiscount: false,
+    discountCode: "",
+  });
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleSuccess, setScheduleSuccess] = useState("");
+  const [scheduleErr, setScheduleErr] = useState("");
+  const [savedTemplates, setSavedTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [showCreateTemplate, setShowCreateTemplate] = useState(false);
+
+  useEffect(() => {
+    if (!restId) return;
+    (async () => {
+      const [{ data: tData }, { data: tmpl }] = await Promise.all([
+        supabase
+          .from("Tags")
+          .select("id,name,color")
+          .eq("rest_id", restId)
+          .order("name"),
+        supabase
+          .from("Broadcast_Templates")
+          .select("*")
+          .eq("rest_id", restId)
+          .order("created_at", { ascending: false }),
+      ]);
+      setTags(tData || []);
+      setSavedTemplates(tmpl || []);
+      setTagsLoading(false);
+      setTemplatesLoading(false);
+    })();
+  }, [restId]);
+
+  const allAudiences = [
+    ...SPECIAL_AUDIENCES.map((s) => ({
+      id: `special_${s.id}`,
+      name: s.name,
+      icon: s.icon,
+      color: s.color,
+      special: true,
+    })),
+    ...(tags || []).map((tg) => ({
+      id: `tag_${tg.id}`,
+      name: tg.name,
+      icon: "🏷️",
+      color: tg.color,
+      special: false,
+      tag_id: tg.id,
+    })),
+  ];
+
+  const toggleAudience = (id) =>
+    setSelectedAudiences((p) =>
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+    );
+
+  const saveTemplate = async () => {
+    if (!template.name.trim()) {
+      setScheduleErr("Template name is required.");
+      return;
+    }
+    if (!template.body.trim()) {
+      setScheduleErr("Message body is required.");
+      return;
+    }
+    setScheduling(true);
+    setScheduleErr("");
+    try {
+      const { error } = await supabase.from("Broadcast_Templates").insert({
+        rest_id: restId,
+        name: template.name.trim().toLowerCase().replace(/\s+/g, "_"),
+        header_type: template.headerType,
+        header_text: template.headerText || null,
+        header_image_url: template.headerImageUrl || null,
+        body: template.body,
+        footer: template.footer,
+        buttons: template.buttons.filter(Boolean),
+        include_discount: template.includeDiscount,
+        discount_code: template.discountCode || null,
+      });
+      if (error) throw error;
+      setScheduleSuccess(
+        "Template saved! To send via WhatsApp Business API, submit this template for approval in your WhatsApp Business Manager.",
+      );
+      setShowCreateTemplate(false);
+      setTemplate({
+        name: "",
+        headerType: "text",
+        headerText: "",
+        headerImageUrl: "",
+        body: "",
+        footer: "Not interested? Type STOP to no longer receive updates.",
+        buttons: [""],
+        includeDiscount: false,
+        discountCode: "",
+      });
+      const { data } = await supabase
+        .from("Broadcast_Templates")
+        .select("*")
+        .eq("rest_id", restId)
+        .order("created_at", { ascending: false });
+      setSavedTemplates(data || []);
+    } catch (e) {
+      setScheduleErr(e.message || "Failed to save template.");
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const FieldLabel = ({ children, sub }) => (
+    <div style={{ marginBottom: 6 }}>
+      <label
+        style={{
+          color: t.subtle,
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          display: "block",
+        }}
+      >
+        {children}
+      </label>
+      {sub && (
+        <p
+          style={{
+            color: t.muted,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 11,
+            marginTop: 2,
+          }}
+        >
+          {sub}
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px 24px 40px", maxWidth: 1000 }}>
+      {scheduleSuccess && (
+        <div
+          style={{
+            background: "#f0fdf4",
+            border: "1px solid #B8DEC9",
+            color: "#2D7A4F",
+            padding: "12px 16px",
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 13,
+          }}
+        >
+          ✅ {scheduleSuccess}
+        </div>
+      )}
+      {scheduleErr && (
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#B83232",
+            padding: "12px 16px",
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 13,
+          }}
+        >
+          ⚠️ {scheduleErr}
+        </div>
+      )}
+
+      {/* Saved templates grid */}
+      <div style={{ marginBottom: 28 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              color: t.text,
+              fontSize: 20,
+              fontWeight: 700,
+              margin: 0,
+            }}
+          >
+            Message Templates
+          </p>
+          <button
+            onClick={() => setShowCreateTemplate(true)}
+            style={{
+              background: t.text,
+              color: t.surface,
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              fontSize: 13,
+              padding: "10px 18px",
+              borderRadius: 10,
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            + Create Template
+          </button>
+        </div>
+
+        {templatesLoading ? (
+          <p style={{ color: t.muted, fontSize: 13 }}>Loading templates…</p>
+        ) : savedTemplates.length === 0 ? (
+          <div
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 14,
+              padding: "32px 20px",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 42, marginBottom: 10, opacity: 0.2 }}>
+              📨
+            </div>
+            <p
+              style={{
+                color: t.muted,
+                fontSize: 14,
+                fontFamily: "'Lato', sans-serif",
+              }}
+            >
+              No templates yet. Create one to get started.
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {savedTemplates.map((tmpl) => (
+              <div
+                key={tmpl.id}
+                style={{
+                  background: t.surface,
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                {/* Template card header */}
+                <div
+                  style={{
+                    padding: "14px 16px 10px",
+                    borderBottom: `1px solid ${t.border}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontFamily: "'Lato', sans-serif",
+                        color: t.text,
+                        fontWeight: 700,
+                        fontSize: 14,
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {tmpl.name}
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        flexShrink: 0,
+                        marginLeft: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          background: t.greenBg,
+                          color: t.green,
+                          border: `1px solid ${t.greenBorder}`,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          fontFamily: "'Lato',sans-serif",
+                        }}
+                      >
+                        Saved
+                      </span>
+                      <span
+                        style={{
+                          background: t.surface2,
+                          color: t.muted,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          fontFamily: "'Lato',sans-serif",
+                        }}
+                      >
+                        {tmpl.header_type || "TEXT"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {/* Preview */}
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    flex: 1,
+                    background: "#FAFAF8",
+                    maxHeight: 150,
+                    overflow: "hidden",
+                  }}
+                >
+                  {tmpl.header_text && (
+                    <p
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: t.text,
+                        marginBottom: 4,
+                        fontFamily: "Arial, sans-serif",
+                      }}
+                    >
+                      {tmpl.header_text}
+                    </p>
+                  )}
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "#444",
+                      lineHeight: 1.5,
+                      fontFamily: "Arial, sans-serif",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {tmpl.body}
+                  </p>
+                </div>
+                {/* Meta */}
+                <div
+                  style={{
+                    padding: "8px 16px",
+                    borderTop: `1px solid ${t.border}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 3,
+                  }}
+                >
+                  {[
+                    ["Header:", tmpl.header_type?.toUpperCase() || "—"],
+                    [
+                      "Body:",
+                      (tmpl.body || "").slice(0, 50) +
+                        ((tmpl.body || "").length > 50 ? "…" : ""),
+                    ],
+                    [
+                      "Footer:",
+                      (tmpl.footer || "—").slice(0, 40) +
+                        ((tmpl.footer || "").length > 40 ? "…" : ""),
+                    ],
+                    ["Buttons:", (tmpl.buttons || []).length + " button(s)"],
+                  ].map(([label, val]) => (
+                    <div
+                      key={label}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: t.text,
+                          fontFamily: "'Lato',sans-serif",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                          minWidth: 50,
+                        }}
+                      >
+                        {label}
+                      </span>
+                      <span
+                        style={{
+                          color: t.muted,
+                          fontFamily: "'Lato',sans-serif",
+                          fontSize: 11,
+                        }}
+                      >
+                        {val}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {/* Send button */}
+                <button
+                  onClick={() => {
+                    if (selectedAudiences.length === 0) {
+                      setScheduleErr(
+                        "Select at least one audience tag below to send to.",
+                      );
+                      return;
+                    }
+                    setScheduleSuccess(
+                      `"${tmpl.name}" queued for ${selectedAudiences.length} audience(s). Send via WhatsApp Business API.`,
+                    );
+                  }}
+                  style={{
+                    background: t.text,
+                    color: t.surface,
+                    fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: "13px 0",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                >
+                  📤 Send Broadcast
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Audience selector */}
+      <div
+        style={{
+          background: t.surface,
+          border: `1px solid ${t.border}`,
+          borderRadius: 14,
+          padding: 20,
+          marginBottom: 20,
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            color: t.text,
+            fontSize: 18,
+            fontWeight: 700,
+            marginBottom: 12,
+          }}
+        >
+          Select Audiences to Broadcast to
+          {selectedAudiences.length > 0 && (
+            <span
+              style={{
+                color: t.accent,
+                fontFamily: "'Lato',sans-serif",
+                fontSize: 13,
+                fontWeight: 600,
+                marginLeft: 10,
+              }}
+            >
+              {selectedAudiences.length} selected
+            </span>
+          )}
+        </p>
+        {tagsLoading ? (
+          <p style={{ color: t.muted, fontSize: 13 }}>Loading…</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {allAudiences.map((aud) => {
+              const sel = selectedAudiences.includes(aud.id);
+              return (
+                <button
+                  key={aud.id}
+                  onClick={() => toggleAudience(aud.id)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "7px 14px",
+                    borderRadius: 99,
+                    border: `1.5px solid ${sel ? aud.color : t.border2}`,
+                    background: sel ? aud.color + "18" : t.surface2,
+                    color: sel ? aud.color : t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all .15s",
+                  }}
+                >
+                  <span>{aud.icon}</span>
+                  {aud.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Create Template Modal */}
+      {showCreateTemplate && (
+        <>
+          <div
+            onClick={() => setShowCreateTemplate(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.5)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              inset: "16px",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 16,
+              overflow: "auto",
+              maxWidth: 680,
+              margin: "auto",
+              height: "fit-content",
+              maxHeight: "calc(100dvh - 32px)",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div
+              style={{
+                padding: "24px 28px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <p
+                style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  color: t.text,
+                  fontSize: 22,
+                  fontWeight: 800,
+                  margin: 0,
+                }}
+              >
+                Create Template
+              </p>
+              <button
+                onClick={() => setShowCreateTemplate(false)}
+                style={{
+                  background: t.surface2,
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                  fontSize: 18,
+                  color: t.subtle,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div
+              style={{
+                padding: "24px 28px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 20,
+              }}
+            >
+              {/* Template Details */}
+              <div
+                style={{
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 12,
+                  padding: 20,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: t.text,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    marginBottom: 16,
+                    borderBottom: `1px solid ${t.border}`,
+                    paddingBottom: 10,
+                  }}
+                >
+                  Template Details
+                </p>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 16,
+                  }}
+                >
+                  <div>
+                    <FieldLabel sub="Only lowercase letters, numbers and underscores. Spaces → underscores.">
+                      Template Name
+                    </FieldLabel>
+                    <input
+                      value={template.name}
+                      onChange={(e) =>
+                        setTemplate((p) => ({
+                          ...p,
+                          name: e.target.value
+                            .toLowerCase()
+                            .replace(/[^a-z0-9_\s]/g, "")
+                            .replace(/\s/g, "_"),
+                        }))
+                      }
+                      placeholder="e.g. discount_offer"
+                      maxLength={50}
+                      style={{
+                        width: "100%",
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Language</FieldLabel>
+                    <select
+                      style={{
+                        width: "100%",
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        fontSize: 13,
+                      }}
+                    >
+                      <option>English</option>
+                      <option>Arabic</option>
+                      <option>Hindi</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <FieldLabel>Header Type</FieldLabel>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {["text", "image", "pdf", "none"].map((ht) => (
+                      <label
+                        key={ht}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          cursor: "pointer",
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 13,
+                          color: t.text,
+                          border: `1.5px solid ${template.headerType === ht ? t.accent : t.border2}`,
+                          padding: "8px 14px",
+                          borderRadius: 8,
+                          background:
+                            template.headerType === ht
+                              ? t.accentBg
+                              : t.surface2,
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          checked={template.headerType === ht}
+                          onChange={() =>
+                            setTemplate((p) => ({ ...p, headerType: ht }))
+                          }
+                          style={{ accentColor: t.accent }}
+                        />
+                        {ht.charAt(0).toUpperCase() + ht.slice(1)}
+                        {ht === "text" ? " Only" : ""}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Header Content */}
+              {(template.headerType === "text" ||
+                template.headerType === "image") && (
+                <div
+                  style={{
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 12,
+                    padding: 20,
+                  }}
+                >
+                  <p
+                    style={{
+                      fontFamily: "'Cormorant Garamond', serif",
+                      color: t.text,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      marginBottom: 14,
+                      borderBottom: `1px solid ${t.border}`,
+                      paddingBottom: 10,
+                    }}
+                  >
+                    Header Content
+                  </p>
+                  {template.headerType === "text" ? (
+                    <div>
+                      <FieldLabel>Header Text</FieldLabel>
+                      <input
+                        value={template.headerText}
+                        onChange={(e) =>
+                          setTemplate((p) => ({
+                            ...p,
+                            headerText: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter Header Text"
+                        maxLength={60}
+                        style={{
+                          width: "100%",
+                          background: t.surface2,
+                          border: `1px solid ${t.border2}`,
+                          color: t.text,
+                          fontFamily: "'Lato', sans-serif",
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <button
+                        onClick={() =>
+                          setTemplate((p) => ({
+                            ...p,
+                            headerText: p.headerText + "{{1}}",
+                          }))
+                        }
+                        style={{
+                          marginTop: 8,
+                          background: t.surface2,
+                          border: `1px solid ${t.border2}`,
+                          color: t.subtle,
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 11,
+                          padding: "5px 12px",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                        }}
+                      >
+                        + Add Variable
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <FieldLabel>Image URL</FieldLabel>
+                      <input
+                        value={template.headerImageUrl}
+                        onChange={(e) =>
+                          setTemplate((p) => ({
+                            ...p,
+                            headerImageUrl: e.target.value,
+                          }))
+                        }
+                        placeholder="https://…"
+                        style={{
+                          width: "100%",
+                          background: t.surface2,
+                          border: `1px solid ${t.border2}`,
+                          color: t.text,
+                          fontFamily: "'Lato', sans-serif",
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Message Body */}
+              <div
+                style={{
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 12,
+                  padding: 20,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: t.text,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    marginBottom: 14,
+                    borderBottom: `1px solid ${t.border}`,
+                    paddingBottom: 10,
+                  }}
+                >
+                  Message Body
+                </p>
+                <FieldLabel sub="Use {{1}}, {{2}} etc. as variable placeholders">
+                  Message Body
+                </FieldLabel>
+                <textarea
+                  value={template.body}
+                  onChange={(e) =>
+                    setTemplate((p) => ({ ...p, body: e.target.value }))
+                  }
+                  rows={5}
+                  placeholder="Enter your message body…"
+                  maxLength={1024}
+                  style={{
+                    width: "100%",
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.text,
+                    fontFamily: "Arial, sans-serif",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    resize: "vertical",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {["Add Variable", "Bold", "Italic"].map((btn) => (
+                    <button
+                      key={btn}
+                      onClick={() => {
+                        if (btn === "Add Variable")
+                          setTemplate((p) => ({
+                            ...p,
+                            body:
+                              p.body +
+                              " {{" +
+                              ((p.body.match(/{{(\d+)}}/g) || []).length + 1 ||
+                                1) +
+                              "}}",
+                          }));
+                        if (btn === "Bold")
+                          setTemplate((p) => ({
+                            ...p,
+                            body: p.body + " *text*",
+                          }));
+                        if (btn === "Italic")
+                          setTemplate((p) => ({
+                            ...p,
+                            body: p.body + " _text_",
+                          }));
+                      }}
+                      style={{
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.subtle,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 11,
+                        padding: "5px 12px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      + {btn}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ color: t.muted, fontSize: 11, marginTop: 6 }}>
+                  {template.body.length}/1024 characters
+                </p>
+              </div>
+
+              {/* Footer + Buttons */}
+              <div
+                style={{
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 12,
+                  padding: 20,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: t.text,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    marginBottom: 14,
+                    borderBottom: `1px solid ${t.border}`,
+                    paddingBottom: 10,
+                  }}
+                >
+                  Footer & Buttons
+                </p>
+                <FieldLabel>Footer Text (optional)</FieldLabel>
+                <input
+                  value={template.footer}
+                  onChange={(e) =>
+                    setTemplate((p) => ({ ...p, footer: e.target.value }))
+                  }
+                  style={{
+                    width: "100%",
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.text,
+                    fontFamily: "'Lato', sans-serif",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    marginBottom: 14,
+                  }}
+                />
+                <FieldLabel>Call-to-Action Buttons (max 3)</FieldLabel>
+                {template.buttons.map((btn, bi) => (
+                  <div
+                    key={bi}
+                    style={{ display: "flex", gap: 8, marginBottom: 6 }}
+                  >
+                    <input
+                      value={btn}
+                      onChange={(e) =>
+                        setTemplate((p) => ({
+                          ...p,
+                          buttons: p.buttons.map((b, i) =>
+                            i === bi ? e.target.value : b,
+                          ),
+                        }))
+                      }
+                      placeholder={`Button ${bi + 1} text`}
+                      maxLength={25}
+                      style={{
+                        flex: 1,
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        fontSize: 13,
+                      }}
+                    />
+                    <button
+                      onClick={() =>
+                        setTemplate((p) => ({
+                          ...p,
+                          buttons: p.buttons.filter((_, i) => i !== bi),
+                        }))
+                      }
+                      style={{
+                        background: "#FEF2F2",
+                        border: "1px solid #FECACA",
+                        color: "#B83232",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {template.buttons.length < 3 && (
+                  <button
+                    onClick={() =>
+                      setTemplate((p) => ({
+                        ...p,
+                        buttons: [...p.buttons, ""],
+                      }))
+                    }
+                    style={{
+                      background: t.surface2,
+                      border: `1px solid ${t.border2}`,
+                      color: t.subtle,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 12,
+                      padding: "7px 14px",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      marginTop: 4,
+                    }}
+                  >
+                    + Add Button
+                  </button>
+                )}
+                {/* Discount code toggle */}
+                <div
+                  style={{
+                    marginTop: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    id="incDisc"
+                    checked={template.includeDiscount}
+                    onChange={(e) =>
+                      setTemplate((p) => ({
+                        ...p,
+                        includeDiscount: e.target.checked,
+                      }))
+                    }
+                    style={{ accentColor: t.accent, width: 16, height: 16 }}
+                  />
+                  <label
+                    htmlFor="incDisc"
+                    style={{
+                      color: t.text,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Include discount code in message
+                  </label>
+                </div>
+                {template.includeDiscount && (
+                  <input
+                    value={template.discountCode}
+                    onChange={(e) =>
+                      setTemplate((p) => ({
+                        ...p,
+                        discountCode: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. WOMEN20"
+                    style={{
+                      marginTop: 8,
+                      background: t.surface2,
+                      border: `1px solid ${t.border2}`,
+                      color: t.text,
+                      fontFamily: "'Courier New', monospace",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      letterSpacing: ".06em",
+                    }}
+                  />
+                )}
+              </div>
+
+              {scheduleErr && (
+                <p style={{ color: t.red, fontSize: 13 }}>⚠️ {scheduleErr}</p>
+              )}
+              <div style={{ display: "flex", gap: 12 }}>
+                <button
+                  onClick={() => setShowCreateTemplate(false)}
+                  style={{
+                    flex: 1,
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: "13px 0",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveTemplate}
+                  disabled={scheduling}
+                  style={{
+                    flex: 2,
+                    background: t.text,
+                    color: t.surface,
+                    fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: "13px 0",
+                    borderRadius: 10,
+                    border: "none",
+                    cursor: "pointer",
+                    opacity: scheduling ? 0.7 : 1,
+                  }}
+                >
+                  {scheduling ? "Saving…" : "Save Template"}
+                </button>
+              </div>
+              <div
+                style={{
+                  background: t.accentBg,
+                  border: `1px solid ${t.accentBorder}`,
+                  borderRadius: 10,
+                  padding: "12px 16px",
+                }}
+              >
+                <p
+                  style={{
+                    color: t.accent,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    margin: 0,
+                  }}
+                >
+                  ℹ️ Templates must be approved by WhatsApp Business API before
+                  they can be sent. After saving, submit your template in the
+                  Meta Business Manager for approval.
+                </p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── AUDIENCES TAB ────────────────────────────────────────────────────────────
+function AudiencesTab({ t, restId }) {
+  const [tags, setTags] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [memberCounts, setMemberCounts] = useState({}); // tag_id → count
+  const [specialCounts, setSpecialCounts] = useState({});
+  const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState(TAG_PALETTE[0]);
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagFormErr, setTagFormErr] = useState("");
+  const [delConfirm, setDelConfirm] = useState(null);
+  const [showAddMembers, setShowAddMembers] = useState(null); // tag or special audience
+  const [addMembersData, setAddMembersData] = useState([]);
+  const [addMembersLoading, setAddMembersLoading] = useState(false);
+  const [addMembersSearch, setAddMembersSearch] = useState("");
+  const [tagMemberSet, setTagMemberSet] = useState(new Set());
+  const [specialModal, setSpecialModal] = useState(null); // { audience, members, loading }
+  const [specialModalSearch, setSpecialModalSearch] = useState("");
+
+  const load = useCallback(async () => {
+    if (!restId) return;
+    setTagsLoading(true);
+    try {
+      const { data: tData } = await supabase
+        .from("Tags")
+        .select("id,name,color,created_at")
+        .eq("rest_id", restId)
+        .order("created_at");
+      const tags = tData || [];
+      setTags(tags);
+
+      // Count members per tag
+      if (tags.length > 0) {
+        const counts = {};
+        await Promise.all(
+          tags.map(async (tg) => {
+            const { count } = await supabase
+              .from("Customer_Tags")
+              .select("id", { count: "exact", head: true })
+              .eq("tag_id", tg.id);
+            counts[tg.id] = count || 0;
+          }),
+        );
+        setMemberCounts(counts);
+      }
+
+      // Compute special audience counts
+      await computeSpecialCounts();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTagsLoading(false);
+    }
+  }, [restId]);
+
+  // Shared data-fetching helper used by BOTH computeSpecialCounts and openSpecialAudienceDetails
+  // so the count card and the modal always use identical logic.
+  const buildAudienceData = async () => {
+    const now = new Date();
+    const d30ms = now.getTime() - 30 * 86400000;
+    const d90ms = now.getTime() - 90 * 86400000;
+    const d7ms = now.getTime() - 7 * 86400000;
+    const d30dateStr = new Date(d30ms).toISOString().slice(0, 10);
+
+    // 1. All accepted orders for this restaurant
+    const { data: orders, error: oErr } = await supabase
+      .from("Orders")
+      .select("cust_id, total_amount, created_at")
+      .eq("rest_id", restId)
+      .in("status", ["delivered", "accepted", "preparing", "on_the_way"]);
+    if (oErr) throw oErr;
+    const allOrders = orders || [];
+
+    // 2. Build per-customer stats; use string IDs throughout to avoid type mismatches
+    const custMap = {}; // string → { orders, rev, lastOrderMs }
+    allOrders.forEach((o) => {
+      const id = String(o.cust_id);
+      if (!custMap[id]) custMap[id] = { orders: 0, rev: 0, lastOrderMs: 0 };
+      custMap[id].orders++;
+      custMap[id].rev += Number(o.total_amount || 0);
+      const ms = new Date(o.created_at).getTime();
+      if (ms > custMap[id].lastOrderMs) custMap[id].lastOrderMs = ms;
+    });
+    const custIds = Object.keys(custMap); // string IDs of everyone who ever ordered
+
+    // 3. All customers linked to this restaurant (for new/opencart/potential)
+    const { data: linkedRows, error: lErr } = await supabase
+      .from("Customer_Restaurant")
+      .select("cust_id")
+      .eq("rest_id", restId);
+    if (lErr) throw lErr;
+    const linkedSetStr = new Set(
+      (linkedRows || []).map((r) => String(r.cust_id)),
+    );
+
+    // 4. New customers — joined_on in last 30 days AND linked to restaurant
+    const { data: newRows, error: nErr } = await supabase
+      .from("Customer")
+      .select("id,cust_name,ph_num,joined_on")
+      .gte("joined_on", d30dateStr);
+    if (nErr) throw nErr;
+    const newMembers = (newRows || []).filter((c) =>
+      linkedSetStr.has(String(c.id)),
+    );
+
+    // 5. Active — ordered within last 30 days (timestamp comparison, not Date object)
+    const active = custIds.filter((id) => custMap[id].lastOrderMs >= d30ms);
+
+    // 6. Inactive — last order was 90+ days ago
+    const inactive = custIds.filter((id) => custMap[id].lastOrderMs < d90ms);
+
+    // 7. VIP — top 20% by total lifetime spend (min 1)
+    const sortedByRev = [...custIds].sort(
+      (a, b) => custMap[b].rev - custMap[a].rev,
+    );
+    const vipCutoff = Math.max(1, Math.ceil(sortedByRev.length * 0.2));
+    const vip = sortedByRev.slice(0, vipCutoff);
+
+    // 8. Repeat Buyers — 5+ orders
+    const repeatbuyers = custIds.filter((id) => custMap[id].orders >= 5);
+
+    // 9. High Avg Spend — per-order avg > 2× restaurant-wide per-order avg
+    const totalOrders = allOrders.length;
+    const totalRevSum = Object.values(custMap).reduce((s, c) => s + c.rev, 0);
+    const restaurantAvgOrderValue =
+      totalOrders > 0 ? totalRevSum / totalOrders : 0;
+    const highavg = custIds.filter((id) => {
+      const c = custMap[id];
+      return c.orders > 0 && c.rev / c.orders >= restaurantAvgOrderValue * 2;
+    });
+
+    // 10. Open Cart — linked to restaurant, but no accepted order in last 7 days
+    //     (same source as potential; just a recency filter)
+    const recentOrdererSet = new Set(
+      allOrders
+        .filter((o) => new Date(o.created_at).getTime() >= d7ms)
+        .map((o) => String(o.cust_id)),
+    );
+    const openCart = [...linkedSetStr].filter(
+      (id) => !recentOrdererSet.has(id),
+    );
+
+    // 11. Potential — linked but never placed any accepted order ever
+    const orderedSetStr = new Set(custIds);
+    const potential = [...linkedSetStr].filter((id) => !orderedSetStr.has(id));
+
+    return {
+      custMap,
+      custIds,
+      allOrders,
+      linkedSetStr,
+      active,
+      inactive,
+      vip,
+      repeatbuyers,
+      highavg,
+      openCart,
+      potential,
+      newMembers,
+      d30ms,
+      d90ms,
+      d7ms,
+    };
+  };
+
+  const computeSpecialCounts = async () => {
+    if (!restId) return;
+    try {
+      const d = await buildAudienceData();
+      setSpecialCounts({
+        active: d.active.length,
+        vip: d.vip.length,
+        new: d.newMembers.length,
+        inactive: d.inactive.length,
+        opencart: d.openCart.length,
+        potential: d.potential.length,
+        highavg: d.highavg.length,
+        repeatbuyers: d.repeatbuyers.length,
+      });
+    } catch (e) {
+      console.error("[specialCounts]", e);
+    }
+  };
+
+  // ── Open details modal for a special (smart) audience ──────────────────────
+  const openSpecialAudienceDetails = async (audience) => {
+    setSpecialModal({ audience, members: [], loading: true });
+    setSpecialModalSearch("");
+    try {
+      const d = await buildAudienceData();
+
+      let targetIds = [];
+      let prebuiltMembers = null; // used for audiences that already have full profile data
+
+      switch (audience.id) {
+        case "active":
+          targetIds = d.active;
+          break;
+        case "inactive":
+          targetIds = d.inactive;
+          break;
+        case "vip":
+          targetIds = d.vip;
+          break;
+        case "repeatbuyers":
+          targetIds = d.repeatbuyers;
+          break;
+        case "highavg":
+          targetIds = d.highavg;
+          break;
+        case "opencart":
+          targetIds = d.openCart;
+          break;
+        case "potential":
+          targetIds = d.potential;
+          break;
+        case "new":
+          // newMembers already has full profile rows from buildAudienceData
+          prebuiltMembers = d.newMembers
+            .map((p) => ({
+              id: p.id,
+              name: p.cust_name || "—",
+              phone: p.ph_num || "—",
+              orders: d.custMap[String(p.id)]?.orders ?? 0,
+              rev: d.custMap[String(p.id)]?.rev ?? 0,
+              joined: p.joined_on,
+            }))
+            .sort((a, b) => b.rev - a.rev);
+          break;
+        default:
+          targetIds = [];
+      }
+
+      if (prebuiltMembers) {
+        setSpecialModal({ audience, members: prebuiltMembers, loading: false });
+        return;
+      }
+
+      if (targetIds.length === 0) {
+        setSpecialModal({ audience, members: [], loading: false });
+        return;
+      }
+
+      // Batch fetch in chunks of 500 to avoid Supabase URL-length limits
+      const CHUNK = 500;
+      let profiles = [];
+      for (let i = 0; i < targetIds.length; i += CHUNK) {
+        const chunk = targetIds.slice(i, i + CHUNK);
+        const { data: rows, error } = await supabase
+          .from("Customer")
+          .select("id,cust_name,ph_num,joined_on")
+          .in("id", chunk);
+        if (error) throw error;
+        profiles = profiles.concat(rows || []);
+      }
+
+      const members = profiles
+        .map((p) => ({
+          id: p.id,
+          name: p.cust_name || "—",
+          phone: p.ph_num || "—",
+          orders: d.custMap[String(p.id)]?.orders ?? 0,
+          rev: d.custMap[String(p.id)]?.rev ?? 0,
+          joined: p.joined_on,
+        }))
+        .sort((a, b) => b.rev - a.rev);
+
+      setSpecialModal({ audience, members, loading: false });
+    } catch (e) {
+      console.error("[specialModal]", e);
+      setSpecialModal((prev) =>
+        prev ? { ...prev, loading: false, error: e.message } : null,
+      );
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const createTag = async () => {
+    const name = newTagName.trim();
+    if (!name) {
+      setTagFormErr("Tag name is required.");
+      return;
+    }
+    if (name.length > 30) {
+      setTagFormErr("Max 30 characters.");
+      return;
+    }
+    if (tags.some((tg) => tg.name.toLowerCase() === name.toLowerCase())) {
+      setTagFormErr("Tag already exists.");
+      return;
+    }
+    setTagSaving(true);
+    setTagFormErr("");
+    try {
+      const { data, error } = await supabase
+        .from("Tags")
+        .insert({ rest_id: restId, name, color: newTagColor })
+        .select()
+        .single();
+      if (error) throw error;
+      setTags((p) => [...p, data]);
+      setMemberCounts((p) => ({ ...p, [data.id]: 0 }));
+      setNewTagName("");
+      setNewTagColor(TAG_PALETTE[0]);
+      setShowCreate(false);
+    } catch (e) {
+      setTagFormErr(
+        e.message?.includes("unique")
+          ? "Tag already exists."
+          : e.message || "Failed to create.",
+      );
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const deleteTag = async (tagId) => {
+    await supabase.from("Tags").delete().eq("id", tagId);
+    setTags((p) => p.filter((tg) => tg.id !== tagId));
+    setDelConfirm(null);
+  };
+
+  const openAddMembers = async (tag) => {
+    setShowAddMembers(tag);
+    setAddMembersLoading(true);
+    setAddMembersSearch("");
+    setAddMembersData([]);
+    try {
+      // Load existing members
+      const { data: existing } = await supabase
+        .from("Customer_Tags")
+        .select("cust_id")
+        .eq("tag_id", tag.id);
+      setTagMemberSet(new Set((existing || []).map((r) => r.cust_id)));
+      // Load all restaurant customers
+      const { data: orders } = await supabase
+        .from("Orders")
+        .select("cust_id")
+        .eq("rest_id", restId);
+      const custIds = [...new Set((orders || []).map((o) => o.cust_id))];
+      if (!custIds.length) {
+        setAddMembersData([]);
+        setAddMembersLoading(false);
+        return;
+      }
+      const { data: custs } = await supabase
+        .from("Customer")
+        .select("id,cust_name,ph_num")
+        .in("id", custIds)
+        .order("cust_name");
+      setAddMembersData(custs || []);
+    } catch {
+      setAddMembersData([]);
+    } finally {
+      setAddMembersLoading(false);
+    }
+  };
+
+  const addToTag = async (cust) => {
+    if (!showAddMembers || tagMemberSet.has(cust.id)) return;
+    const { error } = await supabase
+      .from("Customer_Tags")
+      .insert({ tag_id: showAddMembers.id, cust_id: cust.id, rest_id: restId });
+    if (!error) {
+      setTagMemberSet((p) => new Set([...p, cust.id]));
+      setMemberCounts((p) => ({
+        ...p,
+        [showAddMembers.id]: (p[showAddMembers.id] || 0) + 1,
+      }));
+    }
+  };
+
+  const filteredTags = tags.filter(
+    (tg) => !search || tg.name.toLowerCase().includes(search.toLowerCase()),
+  );
+  const filteredSpecial = SPECIAL_AUDIENCES.filter(
+    (s) => !search || s.name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const AudienceCard = ({
+    name,
+    count,
+    color,
+    icon,
+    onDelete,
+    onViewDetails,
+  }) => (
+    <div
+      style={{
+        background: t.surface,
+        border: `2px solid ${t.border}`,
+        borderTop: `3px solid ${color || t.accent}`,
+        borderRadius: 12,
+        padding: "16px 16px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        position: "relative",
+      }}
+    >
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: t.muted,
+            fontSize: 16,
+          }}
+          title="Delete audience"
+        >
+          🗑
+        </button>
+      )}
+      <p
+        style={{
+          fontFamily: "'Lato', sans-serif",
+          color: t.text,
+          fontWeight: 700,
+          fontSize: 14,
+          paddingRight: 24,
+        }}
+      >
+        {icon && <span style={{ marginRight: 6 }}>{icon}</span>}
+        {name}
+      </p>
+      <p
+        style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          color: t.text,
+          fontSize: 36,
+          fontWeight: 800,
+          lineHeight: 1,
+          margin: "4px 0",
+        }}
+      >
+        {count ?? "—"}
+      </p>
+      <p
+        style={{
+          color: t.muted,
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 12,
+        }}
+      >
+        Total members
+      </p>
+      <button
+        onClick={onViewDetails}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          color: t.accent,
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 12,
+          fontWeight: 600,
+          padding: 0,
+          marginTop: 4,
+        }}
+      >
+        👁 View Audience Details ›
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px 24px 40px" }}>
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginBottom: 20,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 0 }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              opacity: 0.4,
+              fontSize: 14,
+            }}
+          >
+            🔍
+          </span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search audience…"
+            style={{
+              width: "100%",
+              paddingLeft: 36,
+              paddingRight: 14,
+              paddingTop: 10,
+              paddingBottom: 10,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              borderRadius: 99,
+              fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          style={{
+            background: t.text,
+            color: t.surface,
+            fontFamily: "'Lato', sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            padding: "10px 18px",
+            borderRadius: 10,
+            border: "none",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          + Create Audience
+        </button>
+        <button
+          onClick={() => setShowAddMembers({ id: null, name: "All Audiences" })}
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border2}`,
+            color: t.text,
+            fontFamily: "'Lato', sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            padding: "10px 18px",
+            borderRadius: 10,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Add Audience Members
+        </button>
+      </div>
+
+      {/* Create tag modal */}
+      {showCreate && (
+        <>
+          <div
+            onClick={() => setShowCreate(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 16,
+              padding: 28,
+              width: "min(420px, calc(100vw - 32px))",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                color: t.text,
+                fontSize: 22,
+                fontWeight: 800,
+                marginBottom: 16,
+              }}
+            >
+              Create Audience
+            </p>
+            <label
+              style={{
+                color: t.subtle,
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                display: "block",
+                marginBottom: 6,
+              }}
+            >
+              Audience Name
+            </label>
+            <input
+              value={newTagName}
+              onChange={(e) => {
+                setNewTagName(e.target.value);
+                setTagFormErr("");
+              }}
+              onKeyDown={(e) => e.key === "Enter" && createTag()}
+              placeholder="e.g. Female, VIP, Weekend Diners…"
+              maxLength={30}
+              style={{
+                width: "100%",
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: t.text,
+                fontFamily: "'Lato', sans-serif",
+                padding: "10px 12px",
+                borderRadius: 8,
+                fontSize: 13,
+                marginBottom: 14,
+                boxSizing: "border-box",
+              }}
+            />
+            <label
+              style={{
+                color: t.subtle,
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                display: "block",
+                marginBottom: 8,
+              }}
+            >
+              Colour
+            </label>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                marginBottom: 16,
+              }}
+            >
+              {TAG_PALETTE.map((col) => (
+                <button
+                  key={col}
+                  onClick={() => setNewTagColor(col)}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    background: col,
+                    border:
+                      newTagColor === col
+                        ? `3px solid ${t.text}`
+                        : "3px solid transparent",
+                    cursor: "pointer",
+                  }}
+                />
+              ))}
+            </div>
+            {tagFormErr && (
+              <p style={{ color: t.red, fontSize: 12, marginBottom: 10 }}>
+                ⚠️ {tagFormErr}
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => setShowCreate(false)}
+                style={{
+                  flex: 1,
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  color: t.subtle,
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  padding: "11px 0",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createTag}
+                disabled={tagSaving}
+                style={{
+                  flex: 2,
+                  background: t.text,
+                  color: t.surface,
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  padding: "11px 0",
+                  borderRadius: 8,
+                  border: "none",
+                  cursor: "pointer",
+                  opacity: tagSaving ? 0.7 : 1,
+                }}
+              >
+                {tagSaving ? "Creating…" : "Create Audience"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Special audiences */}
+      {!search && (
+        <div style={{ marginBottom: 28 }}>
+          <p
+            style={{
+              color: t.subtle,
+              fontFamily: "'Lato', sans-serif",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: ".08em",
+              textTransform: "uppercase",
+              marginBottom: 14,
+            }}
+          >
+            Smart Audiences
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {SPECIAL_AUDIENCES.map((s) => (
+              <AudienceCard
+                key={s.id}
+                name={s.name}
+                count={specialCounts[s.id]}
+                color={s.color}
+                icon={s.icon}
+                onViewDetails={() => openSpecialAudienceDetails(s)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Custom tag audiences */}
+      <div>
+        <p
+          style={{
+            color: t.subtle,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: ".08em",
+            textTransform: "uppercase",
+            marginBottom: 14,
+          }}
+        >
+          {search ? "Search Results" : "Custom Audiences"}
+        </p>
+        {tagsLoading ? (
+          <p style={{ color: t.muted, fontSize: 13 }}>Loading…</p>
+        ) : filteredTags.length === 0 && !search ? (
+          <div
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 12,
+              padding: "28px 16px",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ color: t.muted, fontSize: 14 }}>
+              No custom audiences yet. Create one above.
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {filteredTags.map((tag) => (
+              <div key={tag.id}>
+                <AudienceCard
+                  name={tag.name}
+                  count={memberCounts[tag.id] ?? "…"}
+                  color={tag.color}
+                  icon="🏷️"
+                  onDelete={() => setDelConfirm(tag.id)}
+                  onViewDetails={() => openAddMembers(tag)}
+                />
+                {delConfirm === tag.id && (
+                  <div
+                    style={{
+                      background: "#FEF2F2",
+                      border: "1px solid #FECACA",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      marginTop: 6,
+                    }}
+                  >
+                    <p
+                      style={{
+                        color: "#B83232",
+                        fontSize: 12,
+                        marginBottom: 8,
+                      }}
+                    >
+                      Delete "{tag.name}"? All member links removed.
+                    </p>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => setDelConfirm(null)}
+                        style={{
+                          flex: 1,
+                          background: "none",
+                          border: `1px solid ${t.border2}`,
+                          color: t.subtle,
+                          borderRadius: 6,
+                          padding: "5px 0",
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => deleteTag(tag.id)}
+                        style={{
+                          flex: 1,
+                          background: "#B83232",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "5px 0",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {search &&
+              filteredSpecial.map((s) => (
+                <AudienceCard
+                  key={s.id}
+                  name={s.name}
+                  count={specialCounts[s.id]}
+                  color={s.color}
+                  icon={s.icon}
+                  onViewDetails={() => openSpecialAudienceDetails(s)}
+                />
+              ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add members panel */}
+      {showAddMembers && showAddMembers.id && (
+        <>
+          <div
+            onClick={() => setShowAddMembers(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 16,
+              padding: 24,
+              width: "min(480px, calc(100vw - 32px))",
+              maxHeight: "70vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+              }}
+            >
+              <p
+                style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  color: t.text,
+                  fontSize: 20,
+                  fontWeight: 700,
+                }}
+              >
+                {showAddMembers.name}
+              </p>
+              <button
+                onClick={() => setShowAddMembers(null)}
+                style={{
+                  background: t.surface2,
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 30,
+                  height: 30,
+                  cursor: "pointer",
+                  color: t.subtle,
+                  fontSize: 16,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <input
+              value={addMembersSearch}
+              onChange={(e) => setAddMembersSearch(e.target.value)}
+              placeholder="Search customers…"
+              style={{
+                width: "100%",
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: t.text,
+                fontFamily: "'Lato', sans-serif",
+                padding: "9px 12px",
+                borderRadius: 8,
+                fontSize: 13,
+                boxSizing: "border-box",
+                marginBottom: 12,
+              }}
+            />
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {addMembersLoading ? (
+                <p style={{ color: t.muted, fontSize: 13 }}>Loading…</p>
+              ) : (
+                addMembersData
+                  .filter(
+                    (c) =>
+                      !addMembersSearch ||
+                      (c.cust_name || "")
+                        .toLowerCase()
+                        .includes(addMembersSearch.toLowerCase()) ||
+                      (c.ph_num || "").includes(addMembersSearch),
+                  )
+                  .map((cust) => {
+                    const inTag = tagMemberSet.has(cust.id);
+                    return (
+                      <div
+                        key={cust.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "8px 0",
+                          borderBottom: `1px solid ${t.border}`,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <p
+                            style={{
+                              color: t.text,
+                              fontSize: 13,
+                              fontWeight: 600,
+                              fontFamily: "'Lato', sans-serif",
+                            }}
+                          >
+                            {cust.cust_name || "—"}
+                          </p>
+                          <p
+                            style={{
+                              color: t.muted,
+                              fontSize: 11,
+                              fontFamily: "'Lato', sans-serif",
+                            }}
+                          >
+                            {cust.ph_num || ""}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => addToTag(cust)}
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "4px 12px",
+                            borderRadius: 6,
+                            border: "none",
+                            cursor: inTag ? "default" : "pointer",
+                            background: inTag ? t.greenBg : t.accentBg,
+                            color: inTag ? t.green : t.accent,
+                          }}
+                        >
+                          {inTag ? "✓ Added" : "+ Add"}
+                        </button>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Special Audience Details Modal ─────────────────────────────────── */}
+      {specialModal && (
+        <>
+          <div
+            onClick={() => setSpecialModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 18,
+              width: "min(520px, calc(100vw - 24px))",
+              maxHeight: "80vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
+              overflow: "hidden",
+            }}
+          >
+            {/* Modal header */}
+            <div
+              style={{
+                background: specialModal.audience.color,
+                padding: "20px 24px 16px",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div>
+                  <p
+                    style={{
+                      color: "#fff",
+                      fontFamily: "'Cormorant Garamond', serif",
+                      fontSize: 22,
+                      fontWeight: 800,
+                      margin: 0,
+                    }}
+                  >
+                    {specialModal.audience.icon} {specialModal.audience.name}
+                  </p>
+                  <p
+                    style={{
+                      color: "rgba(255,255,255,0.75)",
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    {specialModal.audience.desc}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSpecialModal(null)}
+                  style={{
+                    background: "rgba(255,255,255,0.2)",
+                    border: "none",
+                    borderRadius: "50%",
+                    width: 32,
+                    height: 32,
+                    cursor: "pointer",
+                    color: "#fff",
+                    fontSize: 16,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  background: "rgba(255,255,255,0.15)",
+                  borderRadius: 8,
+                  padding: "6px 14px",
+                  display: "inline-block",
+                }}
+              >
+                <span
+                  style={{
+                    color: "#fff",
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {specialModal.loading
+                    ? "Loading…"
+                    : `${specialModal.members?.length ?? 0} members`}
+                </span>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div
+              style={{
+                padding: "14px 20px 10px",
+                flexShrink: 0,
+                borderBottom: `1px solid ${t.border}`,
+              }}
+            >
+              <input
+                value={specialModalSearch}
+                onChange={(e) => setSpecialModalSearch(e.target.value)}
+                placeholder="Search by name or phone…"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  color: t.text,
+                  fontFamily: "'Lato', sans-serif",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              />
+            </div>
+
+            {/* Member list */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+              {specialModal.loading ? (
+                <div style={{ padding: "32px 20px", textAlign: "center" }}>
+                  <p
+                    style={{
+                      color: t.muted,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                    }}
+                  >
+                    Loading members…
+                  </p>
+                </div>
+              ) : specialModal.error ? (
+                <div style={{ padding: "32px 20px", textAlign: "center" }}>
+                  <p
+                    style={{
+                      color: t.red,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                    }}
+                  >
+                    ⚠️ {specialModal.error}
+                  </p>
+                </div>
+              ) : specialModal.members.length === 0 ? (
+                <div style={{ padding: "40px 20px", textAlign: "center" }}>
+                  <div style={{ fontSize: 36, marginBottom: 10, opacity: 0.3 }}>
+                    {specialModal.audience.icon}
+                  </div>
+                  <p
+                    style={{
+                      color: t.muted,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                    }}
+                  >
+                    No members in this audience yet.
+                  </p>
+                </div>
+              ) : (
+                specialModal.members
+                  .filter((m) => {
+                    if (!specialModalSearch) return true;
+                    const q = specialModalSearch.toLowerCase();
+                    return (
+                      (m.name || "").toLowerCase().includes(q) ||
+                      (m.phone || "").includes(q)
+                    );
+                  })
+                  .map((m, i) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "10px 20px",
+                        borderBottom: `1px solid ${t.border}`,
+                        background:
+                          i % 2 === 0 ? "transparent" : t.surface2 + "55",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: "50%",
+                          background: specialModal.audience.color + "22",
+                          border: `1.5px solid ${specialModal.audience.color}44`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontFamily: "'Cormorant Garamond', serif",
+                          fontWeight: 800,
+                          color: specialModal.audience.color,
+                          fontSize: 14,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(m.name || "?").charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p
+                          style={{
+                            color: t.text,
+                            fontFamily: "'Lato', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 13,
+                            margin: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {m.name}
+                        </p>
+                        <p
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            margin: 0,
+                            marginTop: 1,
+                          }}
+                        >
+                          {m.phone || "—"}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <p
+                          style={{
+                            color: t.accent,
+                            fontFamily: "'Cormorant Garamond', serif",
+                            fontWeight: 800,
+                            fontSize: 14,
+                            margin: 0,
+                          }}
+                        >
+                          KD {Number(m.rev || 0).toFixed(3)}
+                        </p>
+                        <p
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            margin: 0,
+                            marginTop: 1,
+                          }}
+                        >
+                          {m.orders} order{m.orders !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+function AudienceMembersTab({ t, restId }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [deleting, setDeleting] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!restId) return;
+    setLoading(true);
+    try {
+      const { data } = await supabase
+        .from("Customer_Tags")
+        .select(
+          "id, cust_id, added_at, rest_id, tag_id, Tags(name, color), Customer(cust_name, ph_num, broadcast)",
+        )
+        .eq("rest_id", restId)
+        .order("added_at", { ascending: false });
+      setMembers(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [restId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const filtered = members.filter((m) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (m.Customer?.cust_name || "").toLowerCase().includes(q) ||
+      (m.Customer?.ph_num || "").includes(q) ||
+      (m.Tags?.name || "").toLowerCase().includes(q)
+    );
+  });
+
+  const toggleSelect = (id) =>
+    setSelectedIds((p) => {
+      const n = new Set(p);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelectedIds(
+      selectedIds.size === filtered.length
+        ? new Set()
+        : new Set(filtered.map((m) => m.id)),
+    );
+
+  const deleteSelected = async () => {
+    if (!selectedIds.size) return;
+    setDeleting(true);
+    await supabase
+      .from("Customer_Tags")
+      .delete()
+      .in("id", [...selectedIds]);
+    setMembers((p) => p.filter((m) => !selectedIds.has(m.id)));
+    setSelectedIds(new Set());
+    setDeleting(false);
+  };
+
+  return (
+    <div style={{ padding: "20px 24px 40px" }}>
+      <style>{`
+        .am-table { width: 100%; border-collapse: collapse; min-width: 580px; }
+        .am-table th { padding: 12px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+        .am-table td { padding: 12px 14px; font-size: 13px; vertical-align: middle; border-bottom: 1px solid; white-space: nowrap; }
+        .am-table tr:hover td { filter: brightness(0.97); }
+        @media(max-width:600px){ .am-table th, .am-table td { padding: 9px 10px; font-size: 12px; } }
+      `}</style>
+
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 11,
+              top: "50%",
+              transform: "translateY(-50%)",
+              opacity: 0.4,
+              fontSize: 14,
+            }}
+          >
+            🔍
+          </span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search table…"
+            style={{
+              width: "100%",
+              paddingLeft: 34,
+              paddingRight: 14,
+              paddingTop: 9,
+              paddingBottom: 9,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              borderRadius: 8,
+              fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        {selectedIds.size > 0 && (
+          <button
+            onClick={deleteSelected}
+            disabled={deleting}
+            style={{
+              background: t.text,
+              color: t.surface,
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              fontSize: 13,
+              padding: "9px 18px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              opacity: deleting ? 0.7 : 1,
+            }}
+          >
+            {deleting ? "Deleting…" : `Delete Selected (${selectedIds.size})`}
+          </button>
+        )}
+        <button
+          onClick={load}
+          style={{
+            background: t.surface2,
+            border: `1px solid ${t.border2}`,
+            color: t.subtle,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 13,
+            padding: "9px 14px",
+            borderRadius: 8,
+            cursor: "pointer",
+          }}
+        >
+          ↺ Refresh
+        </button>
+      </div>
+
+      {loading ? (
+        <p style={{ color: t.muted, fontSize: 13 }}>Loading members…</p>
+      ) : (
+        <div
+          style={{
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            borderRadius: 12,
+            border: `1px solid ${t.border}`,
+          }}
+        >
+          <table className="am-table">
+            <thead>
+              <tr style={{ background: t.text, color: t.surface }}>
+                <th style={{ color: "#fff", width: 44 }}>
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedIds.size > 0 &&
+                      selectedIds.size === filtered.length
+                    }
+                    onChange={toggleAll}
+                    style={{ accentColor: "#fff", width: 15, height: 15 }}
+                  />
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Phone Number
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Member Name
+                </th>
+                <th
+                  style={{
+                    color: "#fff",
+                    fontFamily: "'Lato', sans-serif",
+                    textAlign: "center",
+                  }}
+                >
+                  🔊
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Audiences
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Added
+                </th>
+                <th style={{ color: "#fff", width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    style={{
+                      color: t.muted,
+                      textAlign: "center",
+                      padding: "32px 14px",
+                      fontFamily: "'Lato', sans-serif",
+                      borderBottom: "none",
+                    }}
+                  >
+                    {search
+                      ? "No members match your search."
+                      : "No audience members yet."}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((m, i) => (
+                  <tr
+                    key={m.id}
+                    style={{
+                      background: i % 2 === 0 ? t.surface : t.surface2,
+                      cursor: "default",
+                    }}
+                  >
+                    <td style={{ color: t.text, borderBottomColor: t.border }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(m.id)}
+                        onChange={() => toggleSelect(m.id)}
+                        style={{ accentColor: t.accent, width: 15, height: 15 }}
+                      />
+                    </td>
+                    <td
+                      style={{
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        borderBottomColor: t.border,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {m.Customer?.ph_num || "—"}
+                    </td>
+                    <td
+                      style={{
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        borderBottomColor: t.border,
+                      }}
+                    >
+                      {m.Customer?.cust_name || "—"}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "center",
+                        borderBottomColor: t.border,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 12,
+                          color: m.Customer?.broadcast ? t.green : t.muted,
+                        }}
+                      >
+                        {m.Customer?.broadcast ? "Yes" : "No"}
+                      </span>
+                    </td>
+                    <td style={{ borderBottomColor: t.border }}>
+                      {m.Tags ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            background: (m.Tags.color || t.accent) + "22",
+                            border: `1px solid ${m.Tags.color || t.accent}44`,
+                            color: m.Tags.color || t.accent,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "3px 10px",
+                            borderRadius: 99,
+                          }}
+                        >
+                          {m.Tags.name}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        color: t.muted,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 12,
+                        borderBottomColor: t.border,
+                      }}
+                    >
+                      {new Date(m.added_at).toLocaleDateString("en-KW", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </td>
+                    <td style={{ borderBottomColor: t.border }}>
+                      <button
+                        onClick={async () => {
+                          await supabase
+                            .from("Customer_Tags")
+                            .delete()
+                            .eq("id", m.id);
+                          setMembers((p) => p.filter((x) => x.id !== m.id));
+                        }}
+                        style={{
+                          background: "#FEF2F2",
+                          border: "1px solid #FECACA",
+                          color: "#B83232",
+                          borderRadius: 6,
+                          padding: "4px 8px",
+                          cursor: "pointer",
+                          fontSize: 13,
+                        }}
+                        title="Remove from audience"
+                      >
+                        🗑
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+          {filtered.length > 0 && (
+            <div
+              style={{
+                padding: "10px 16px",
+                background: t.surface2,
+                borderTop: `1px solid ${t.border}`,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <p
+                style={{
+                  color: t.muted,
+                  fontFamily: "'Lato', sans-serif",
+                  fontSize: 12,
+                }}
+              >
+                {filtered.length} member{filtered.length !== 1 ? "s" : ""}
+              </p>
+              {selectedIds.size > 0 && (
+                <p
+                  style={{
+                    color: t.accent,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {selectedIds.size} selected
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -10854,6 +13961,8 @@ export default function Dashboard({ user, onLogout }) {
         return <DeliveryPage t={t} user={user} />;
       case "customers":
         return <CustomersPage t={t} user={user} />;
+      case "broadcast":
+        return <BroadcastPage t={t} user={user} />;
       case "menu":
         return <MenuPage t={t} user={user} />;
       case "discounts":
