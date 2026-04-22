@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import "./index.css";
 
@@ -14125,7 +14126,7 @@ function CancellationsPage({ t, user }) {
                         {fmtKD(o.total_amount)}
                       </td>
                       <td style={{ borderBottomColor: t.border }}>
-                        <CancelOrderDetailButton order={o} t={t} restId={restId} />
+                        <CancelOrderDetailButton order={o} t={t} />
                       </td>
                     </tr>
                   ))
@@ -14185,165 +14186,285 @@ function CancellationsPage({ t, user }) {
   );
 }
 
-// ─── CancelOrderDetailButton — inline expandable detail ───────────────────────
-function CancelOrderDetailButton({ order, t, restId }) {
+// ─── CancelOrderDetailButton — portal-based modal with full price breakdown ────
+function CancelOrderDetailButton({ order, t }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
+  const [discount, setDiscount] = useState(null);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [fetched, setFetched] = useState(false);
 
-  const loadItems = async () => {
-    if (items.length > 0) { setOpen(true); return; }
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (open) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
+  const loadData = async () => {
+    if (fetched) { setOpen(true); return; }
     setLoadingItems(true);
     try {
-      const { data } = await supabase
-        .from("Order_Items")
-        .select("id, quantity, unit_price, subtotal, item_note, Menu(name)")
-        .eq("order_id", order.id);
-      setItems(data || []);
+      const [itemsRes, discountRes] = await Promise.all([
+        supabase
+          .from("Order_Items")
+          .select("id, quantity, unit_price, subtotal, item_note, Menu(name)")
+          .eq("order_id", order.id),
+        supabase
+          .from("Discount_Redemptions")
+          .select("amount_saved, Discounts(code, type, value)")
+          .eq("order_id", order.id)
+          .maybeSingle(),
+      ]);
+      setItems(itemsRes.data || []);
+      if (discountRes.data) {
+        setDiscount({
+          code: discountRes.data.Discounts?.code || "—",
+          type: discountRes.data.Discounts?.type || "fixed",
+          value: discountRes.data.Discounts?.value ?? 0,
+          amount_saved: Number(discountRes.data.amount_saved || 0),
+        });
+      }
+      setFetched(true);
       setOpen(true);
     } catch (e) {
-      console.error(e);
+      console.error("[CancelOrderDetail]", e);
+      setFetched(true);
       setOpen(true);
     } finally {
       setLoadingItems(false);
     }
   };
 
+  // Computed bill values
+  const itemsSubtotal = items.reduce(
+    (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0), 0
+  );
+  const deliveryFee = 0.5;
+  const discountAmt = discount?.amount_saved ?? 0;
+
+  const modal = open ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+        background: "rgba(0,0,0,0.52)",
+        backdropFilter: "blur(5px)",
+        WebkitBackdropFilter: "blur(5px)",
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+    >
+      <div
+        style={{
+          background: t.surface,
+          border: `1px solid ${t.border}`,
+          borderRadius: 16,
+          padding: 24,
+          width: "min(500px, calc(100vw - 32px))",
+          maxHeight: "85vh",
+          overflowY: "auto",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.28)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── Header ── */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
+          <div>
+            <p style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 22, fontWeight: 800, lineHeight: 1.1 }}>
+              Order #{order.id}
+            </p>
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 3 }}>
+              {fmtDate(order.created_at)}
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <span style={{
+              background: "rgba(184,50,50,0.10)",
+              color: "#B83232",
+              border: "1px solid rgba(184,50,50,0.25)",
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              fontSize: 11,
+              padding: "4px 11px",
+              borderRadius: 99,
+              letterSpacing: ".04em",
+            }}>
+              Cancelled
+            </span>
+            <button
+              onClick={() => setOpen(false)}
+              style={{
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                borderRadius: 8,
+                cursor: "pointer",
+                color: t.muted,
+                fontSize: 16,
+                lineHeight: 1,
+                width: 30,
+                height: 30,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* ── Customer ── */}
+        <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 }}>
+          <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 7 }}>Customer</p>
+          <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+            {order.Customer?.cust_name || "—"}
+          </p>
+          <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+            {order.Customer?.ph_num || "—"}
+          </p>
+        </div>
+
+        {/* ── Items ── */}
+        <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>Items</p>
+        {loadingItems ? (
+          <p style={{ color: t.muted, fontSize: 13, fontFamily: "'Lato', sans-serif", marginBottom: 18 }}>Loading…</p>
+        ) : items.length === 0 ? (
+          <p style={{ color: t.muted, fontSize: 13, fontFamily: "'Lato', sans-serif", marginBottom: 18 }}>No items recorded.</p>
+        ) : (
+          <div style={{ marginBottom: 18, border: `1px solid ${t.border}`, borderRadius: 10, overflow: "hidden" }}>
+            {items.map((it, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  padding: "11px 14px",
+                  borderBottom: i < items.length - 1 ? `1px solid ${t.border}` : "none",
+                  background: t.surface,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: it.item_note ? 3 : 0 }}>
+                    ×{it.quantity} {it.Menu?.name || "Item"}
+                  </p>
+                  {it.item_note && (
+                    <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, fontStyle: "italic" }}>📝 {it.item_note}</p>
+                  )}
+                </div>
+                <p style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
+                  {fmtKD(it.subtotal ?? it.unit_price * it.quantity)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Bill Summary ── */}
+        <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>Bill Summary</p>
+        <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: order.notes ? 16 : 0 }}>
+          {/* Payment method */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, marginBottom: 10, borderBottom: `1px solid ${t.border}` }}>
+            <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Payment method</span>
+            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13 }}>
+              {order.payment_method || "—"}
+            </span>
+          </div>
+
+          {/* Items subtotal */}
+          {!loadingItems && items.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Items subtotal</span>
+              <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(itemsSubtotal)}</span>
+            </div>
+          )}
+
+          {/* Delivery fee */}
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: discountAmt > 0 ? 8 : 0 }}>
+            <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Delivery fee</span>
+            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(deliveryFee)}</span>
+          </div>
+
+          {/* Discount row — only if coupon was applied */}
+          {discount && discountAmt > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, color: t.green, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                🏷️
+                <span style={{
+                  background: t.greenBg,
+                  border: `1px solid ${t.greenBorder}`,
+                  color: t.green,
+                  borderRadius: 999,
+                  padding: "1px 8px",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: ".04em",
+                  fontFamily: "'Lato', sans-serif",
+                }}>
+                  {discount.code}
+                </span>
+                <span style={{ color: t.muted, fontSize: 11, fontFamily: "'Lato', sans-serif" }}>
+                  ({discount.type === "percentage" ? `${discount.value}% off` : `KD ${Number(discount.value).toFixed(3)} off`})
+                </span>
+              </span>
+              <span style={{ color: t.green, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 13 }}>
+                −{fmtKD(discountAmt)}
+              </span>
+            </div>
+          )}
+
+          {/* Grand total */}
+          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, borderTop: `1px solid ${t.border}`, marginTop: 12 }}>
+            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 15 }}>Total</span>
+            <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 800, fontSize: 16 }}>{fmtKD(order.total_amount)}</span>
+          </div>
+        </div>
+
+        {/* ── Order Note ── */}
+        {order.notes && (
+          <div style={{ marginTop: 16, padding: "11px 14px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10 }}>
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 5 }}>Order Note</p>
+            <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontSize: 13, fontStyle: "italic" }}>"{order.notes}"</p>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <>
       <button
-        onClick={() => open ? setOpen(false) : loadItems()}
+        onClick={() => open ? setOpen(false) : loadData()}
         style={{
-          background: open ? t.surface2 : t.accentBg,
-          border: `1px solid ${open ? t.border2 : t.accentBorder}`,
-          color: open ? t.subtle : t.accent,
+          background: t.accentBg,
+          border: `1px solid ${t.accentBorder}`,
+          color: t.accent,
           fontFamily: "'Lato', sans-serif",
           fontWeight: 600,
           fontSize: 12,
-          padding: "5px 12px",
+          padding: "5px 14px",
           borderRadius: 6,
           cursor: "pointer",
           whiteSpace: "nowrap",
         }}
       >
-        {loadingItems ? "…" : open ? "Hide" : "View"}
+        {loadingItems ? "…" : "View"}
       </button>
-      {open && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 200,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px",
-            background: "rgba(0,0,0,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
-        >
-          <div
-            style={{
-              background: t.surface,
-              border: `1px solid ${t.border}`,
-              borderRadius: 16,
-              padding: 24,
-              width: "min(480px, calc(100vw - 32px))",
-              maxHeight: "80vh",
-              overflowY: "auto",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
-            }}
-          >
-            {/* Modal header */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <div>
-                <p style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 20, fontWeight: 800 }}>
-                  Order #{order.id}
-                </p>
-                <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 2 }}>
-                  {fmtDate(order.created_at)}
-                </p>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ background: "rgba(184,50,50,0.08)", color: "#B83232", fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 11, padding: "4px 10px", borderRadius: 99 }}>
-                  Cancelled
-                </span>
-                <button
-                  onClick={() => setOpen(false)}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: t.muted, fontSize: 18, lineHeight: 1 }}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            {/* Customer info */}
-            <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-              <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 6 }}>Customer</p>
-              <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
-                {order.Customer?.cust_name || "—"}
-              </p>
-              <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
-                {order.Customer?.ph_num || "—"}
-              </p>
-            </div>
-
-            {/* Order items */}
-            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 8 }}>Items</p>
-            {items.length === 0 ? (
-              <p style={{ color: t.muted, fontSize: 13, fontFamily: "'Lato', sans-serif", marginBottom: 16 }}>No items recorded.</p>
-            ) : (
-              <div style={{ marginBottom: 16 }}>
-                {items.map((it, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 10,
-                      padding: "9px 0",
-                      borderBottom: i < items.length - 1 ? `1px solid ${t.border}` : "none",
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: it.item_note ? 2 : 0 }}>
-                        ×{it.quantity} {it.Menu?.name || "Item"}
-                      </p>
-                      {it.item_note && (
-                        <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, fontStyle: "italic" }}>📝 {it.item_note}</p>
-                      )}
-                    </div>
-                    <p style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
-                      {fmtKD(it.subtotal ?? it.unit_price * it.quantity)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Totals */}
-            <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Payment</span>
-                <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13 }}>{order.payment_method}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, borderTop: `1px solid ${t.border}`, marginTop: 4 }}>
-                <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14 }}>Total</span>
-                <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 800, fontSize: 15 }}>{fmtKD(order.total_amount)}</span>
-              </div>
-            </div>
-
-            {order.notes && (
-              <div style={{ marginTop: 14, padding: "10px 14px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10 }}>
-                <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 4 }}>Note</p>
-                <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontSize: 13, fontStyle: "italic" }}>"{order.notes}"</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {typeof document !== "undefined" && createPortal(modal, document.body)}
     </>
   );
 }
