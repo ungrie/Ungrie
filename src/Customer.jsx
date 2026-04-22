@@ -676,13 +676,14 @@ const ErrScreen = ({ msg }) => (
 );
 
 /* ── HeroSlideshow ────────────────────────────────────────────────────────── */
-const FALLBACK_IMAGES = ["/image_1.jpg", "/image_2.jpg", "/image_3.jpg"];
+const FALLBACK_IMAGES = ["/image_1.jpg", "/image_2.jpg", "/image_3.jpg", "/image_4.jpg"];
 
 function HeroSlideshow({ restaurant }) {
   const rawSlides = [
     restaurant?.image1_path,
     restaurant?.image2_path,
     restaurant?.image3_path,
+    restaurant?.image4_path,
   ];
   // Build slides: use restaurant image if present, else corresponding fallback
   const slides = rawSlides.map((src, i) => src || FALLBACK_IMAGES[i]);
