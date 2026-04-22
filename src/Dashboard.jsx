@@ -8398,6 +8398,7 @@ const STATUS_META = {
     bg: "rgba(45,122,79,0.08)",
   },
   rejected: { label: "Rejected", color: "#B83232", bg: "rgba(184,50,50,0.08)" },
+  cancelled: { label: "Cancelled", color: "#B83232", bg: "rgba(184,50,50,0.08)" },
 };
 
 // ─── Invoice Generator (opens print dialog with styled HTML) ─────────────────
@@ -8887,6 +8888,7 @@ function OrdersPage({ t, user }) {
     preparing: orders.filter((o) => o.status === "preparing"),
     on_the_way: orders.filter((o) => o.status === "on_the_way"),
     history: orders.filter((o) => ["delivered", "rejected"].includes(o.status)),
+    cancelled: orders.filter((o) => o.status === "cancelled"),
   };
   const displayed = byStatus[orderTab] || [];
 
@@ -9012,7 +9014,8 @@ function OrdersPage({ t, user }) {
     const isAccepted = selectedOrder.status === "accepted";
     const isPreparing = selectedOrder.status === "preparing";
     const isOnWay = selectedOrder.status === "on_the_way";
-    const isClosed = ["delivered", "rejected"].includes(selectedOrder.status);
+    const isCancelled = selectedOrder.status === "cancelled";
+    const isClosed = ["delivered", "rejected", "cancelled"].includes(selectedOrder.status);
 
     return (
       <div
@@ -9544,6 +9547,27 @@ function OrdersPage({ t, user }) {
               </p>
             </div>
           )}
+
+          {/* Cancelled by customer notice */}
+          {isCancelled && (
+            <div
+              className="mx-5 my-3 px-4 py-3 rounded-lg"
+              style={{ background: "#FEF2F2", border: "1px solid #FECACA" }}
+            >
+              <p
+                style={{ color: "#B83232", fontFamily: "'Lato', sans-serif", fontWeight: 700 }}
+                className="text-sm mb-1"
+              >
+                ✕ Order Cancelled by Customer
+              </p>
+              <p
+                style={{ color: "#B83232", fontFamily: "'Lato', sans-serif", opacity: 0.8 }}
+                className="text-xs"
+              >
+                The customer cancelled this order before it was accepted. No action required.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Action footer */}
@@ -9659,6 +9683,7 @@ function OrdersPage({ t, user }) {
     { id: "preparing", label: "Preparing", color: "#7C3AED" },
     { id: "on_the_way", label: "On Way", color: t.green },
     { id: "history", label: "History", color: t.muted },
+    { id: "cancelled", label: "Cancelled", color: "#B83232" },
   ];
 
   const TabStrip = () => (
@@ -13901,6 +13926,428 @@ function MenuPage({ t, user }) {
   );
 }
 
+// ─── CancellationsPage ────────────────────────────────────────────────────────
+function CancellationsPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    if (!restId) { setLoading(false); return; }
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("Orders")
+          .select(
+            `id, status, total_amount, payment_method, payment_status, notes, created_at,
+             cust_id, Customer(id, cust_name, ph_num)`
+          )
+          .eq("rest_id", restId)
+          .eq("status", "cancelled")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        setOrders(data || []);
+      } catch (e) {
+        console.error("[CancellationsPage]", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [restId]);
+
+  // Realtime: pick up newly cancelled orders live
+  useEffect(() => {
+    if (!restId) return;
+    const ch = supabase
+      .channel(`cancellations-${restId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Orders",
+          filter: `rest_id=eq.${restId}`,
+        },
+        (payload) => {
+          if (payload.new?.status === "cancelled") {
+            setOrders((prev) => {
+              if (prev.find((o) => o.id === payload.new.id)) return prev;
+              return [{ ...payload.new }, ...prev];
+            });
+          }
+        },
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [restId]);
+
+  const filtered = orders.filter((o) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      String(o.id).includes(q) ||
+      (o.Customer?.cust_name || "").toLowerCase().includes(q) ||
+      (o.Customer?.ph_num || "").includes(q) ||
+      (o.payment_method || "").toLowerCase().includes(q)
+    );
+  });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  return (
+    <div style={{ padding: "20px 24px 40px" }}>
+      <style>{`
+        .cancel-table { width: 100%; border-collapse: collapse; min-width: 700px; }
+        .cancel-table th { padding: 13px 16px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; font-family: 'Lato', sans-serif; }
+        .cancel-table td { padding: 13px 16px; font-size: 13px; vertical-align: middle; border-bottom: 1px solid; white-space: nowrap; font-family: 'Lato', sans-serif; }
+        .cancel-table tr:last-child td { border-bottom: none; }
+        .cancel-table tbody tr:hover td { filter: brightness(0.97); }
+        @media(max-width:640px){ .cancel-table th, .cancel-table td { padding: 10px 11px; font-size: 12px; } }
+      `}</style>
+
+      {/* Header */}
+      <h1
+        style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text }}
+        className="text-3xl md:text-4xl font-bold tracking-tight mb-1"
+      >
+        Cancellations
+      </h1>
+      <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, marginBottom: 20 }}>
+        Orders cancelled by customers before being accepted.
+      </p>
+
+      {/* Search */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 260px", minWidth: 0 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", opacity: 0.4, fontSize: 14 }}>
+            🔍
+          </span>
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+            placeholder="Search Table...."
+            style={{
+              width: "100%",
+              paddingLeft: 36,
+              paddingRight: 14,
+              paddingTop: 10,
+              paddingBottom: 10,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              borderRadius: 8,
+              fontSize: 13,
+              boxSizing: "border-box",
+              outline: "none",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading cancellations…</p>
+      ) : (
+        <>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: 12, border: `1px solid ${t.border}` }}>
+            <table className="cancel-table">
+              <thead>
+                <tr style={{ background: t.text }}>
+                  <th style={{ color: "#fff" }}>Order ID</th>
+                  <th style={{ color: "#fff" }}>Order Type</th>
+                  <th style={{ color: "#fff" }}>Ordered On</th>
+                  <th style={{ color: "#fff" }}>Phone No.</th>
+                  <th style={{ color: "#fff" }}>Customer Name</th>
+                  <th style={{ color: "#fff" }}>Payment Mode</th>
+                  <th style={{ color: "#fff" }}>Status</th>
+                  <th style={{ color: "#fff" }}>Bill Total</th>
+                  <th style={{ color: "#fff" }}>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      style={{
+                        color: t.muted,
+                        textAlign: "center",
+                        padding: "40px 14px",
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 13,
+                      }}
+                    >
+                      {search ? "No cancellations match your search." : "No results."}
+                    </td>
+                  </tr>
+                ) : (
+                  paginated.map((o) => (
+                    <tr key={o.id}>
+                      <td style={{ color: t.text, fontWeight: 700, borderBottomColor: t.border }}>
+                        #{o.id}
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        Delivery
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        {fmtDate(o.created_at)}
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        {o.Customer?.ph_num || "—"}
+                      </td>
+                      <td style={{ color: t.text, fontWeight: 600, borderBottomColor: t.border }}>
+                        {o.Customer?.cust_name || "—"}
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        {o.payment_method || "—"}
+                      </td>
+                      <td style={{ borderBottomColor: t.border }}>
+                        <span
+                          style={{
+                            background: "rgba(184,50,50,0.08)",
+                            color: "#B83232",
+                            fontFamily: "'Lato', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 11,
+                            padding: "3px 10px",
+                            borderRadius: 99,
+                          }}
+                        >
+                          Cancelled
+                        </span>
+                      </td>
+                      <td style={{ color: t.accent, fontWeight: 700, borderBottomColor: t.border }}>
+                        {fmtKD(o.total_amount)}
+                      </td>
+                      <td style={{ borderBottomColor: t.border }}>
+                        <CancelOrderDetailButton order={o} t={t} restId={restId} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              style={{
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: page === 0 ? t.muted : t.text,
+                fontFamily: "'Lato', sans-serif",
+                fontWeight: 600,
+                fontSize: 13,
+                padding: "8px 18px",
+                borderRadius: 8,
+                cursor: page === 0 ? "not-allowed" : "pointer",
+                opacity: page === 0 ? 0.6 : 1,
+              }}
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              style={{
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: page >= totalPages - 1 ? t.muted : t.text,
+                fontFamily: "'Lato', sans-serif",
+                fontWeight: 600,
+                fontSize: 13,
+                padding: "8px 18px",
+                borderRadius: 8,
+                cursor: page >= totalPages - 1 ? "not-allowed" : "pointer",
+                opacity: page >= totalPages - 1 ? 0.6 : 1,
+              }}
+            >
+              Next
+            </button>
+          </div>
+
+          {filtered.length > 0 && (
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 8, textAlign: "right" }}>
+              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length} cancellation{filtered.length !== 1 ? "s" : ""}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── CancelOrderDetailButton — inline expandable detail ───────────────────────
+function CancelOrderDetailButton({ order, t, restId }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+
+  const loadItems = async () => {
+    if (items.length > 0) { setOpen(true); return; }
+    setLoadingItems(true);
+    try {
+      const { data } = await supabase
+        .from("Order_Items")
+        .select("id, quantity, unit_price, subtotal, item_note, Menu(name)")
+        .eq("order_id", order.id);
+      setItems(data || []);
+      setOpen(true);
+    } catch (e) {
+      console.error(e);
+      setOpen(true);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => open ? setOpen(false) : loadItems()}
+        style={{
+          background: open ? t.surface2 : t.accentBg,
+          border: `1px solid ${open ? t.border2 : t.accentBorder}`,
+          color: open ? t.subtle : t.accent,
+          fontFamily: "'Lato', sans-serif",
+          fontWeight: 600,
+          fontSize: 12,
+          padding: "5px 12px",
+          borderRadius: 6,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {loadingItems ? "…" : open ? "Hide" : "View"}
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+            background: "rgba(0,0,0,0.45)",
+            backdropFilter: "blur(4px)",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+        >
+          <div
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 16,
+              padding: 24,
+              width: "min(480px, calc(100vw - 32px))",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+          >
+            {/* Modal header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <p style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 20, fontWeight: 800 }}>
+                  Order #{order.id}
+                </p>
+                <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 2 }}>
+                  {fmtDate(order.created_at)}
+                </p>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ background: "rgba(184,50,50,0.08)", color: "#B83232", fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 11, padding: "4px 10px", borderRadius: 99 }}>
+                  Cancelled
+                </span>
+                <button
+                  onClick={() => setOpen(false)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: t.muted, fontSize: 18, lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Customer info */}
+            <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+              <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 6 }}>Customer</p>
+              <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+                {order.Customer?.cust_name || "—"}
+              </p>
+              <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                {order.Customer?.ph_num || "—"}
+              </p>
+            </div>
+
+            {/* Order items */}
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 8 }}>Items</p>
+            {items.length === 0 ? (
+              <p style={{ color: t.muted, fontSize: 13, fontFamily: "'Lato', sans-serif", marginBottom: 16 }}>No items recorded.</p>
+            ) : (
+              <div style={{ marginBottom: 16 }}>
+                {items.map((it, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 10,
+                      padding: "9px 0",
+                      borderBottom: i < items.length - 1 ? `1px solid ${t.border}` : "none",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: it.item_note ? 2 : 0 }}>
+                        ×{it.quantity} {it.Menu?.name || "Item"}
+                      </p>
+                      {it.item_note && (
+                        <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, fontStyle: "italic" }}>📝 {it.item_note}</p>
+                      )}
+                    </div>
+                    <p style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
+                      {fmtKD(it.subtotal ?? it.unit_price * it.quantity)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Totals */}
+            <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Payment</span>
+                <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13 }}>{order.payment_method}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, borderTop: `1px solid ${t.border}`, marginTop: 4 }}>
+                <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14 }}>Total</span>
+                <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 800, fontSize: 15 }}>{fmtKD(order.total_amount)}</span>
+              </div>
+            </div>
+
+            {order.notes && (
+              <div style={{ marginTop: 14, padding: "10px 14px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10 }}>
+                <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", marginBottom: 4 }}>Note</p>
+                <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontSize: 13, fontStyle: "italic" }}>"{order.notes}"</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── Root Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard({ user, onLogout }) {
   const [activeNav, setActiveNav] = useState("home");
@@ -13967,6 +14414,8 @@ export default function Dashboard({ user, onLogout }) {
         return <MenuPage t={t} user={user} />;
       case "discounts":
         return <DiscountsPage t={t} user={user} />;
+      case "cancellations":
+        return <CancellationsPage t={t} user={user} />;
       default:
         return (
           <div className="p-8 flex items-center justify-center min-h-[50vh]">

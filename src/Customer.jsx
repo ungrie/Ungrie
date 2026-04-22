@@ -268,31 +268,35 @@ const Ic = {
 
 /* ── global CSS ───────────────────────────────────────────────────────────── */
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap');
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --orange:#ff5200;
   --orange-d:#e04800;
+  --orange-l:rgba(255,82,0,.08);
   --green:#1e8c45;
   --green-l:#e8f5ee;
   --red:#e53935;
   --red-l:#fdecea;
   --yellow:#f59e0b;
-  --bg:#f2f2f7;
+  --bg:#f4f3f0;
   --card:#ffffff;
-  --border:#ebebeb;
-  --t1:#1a1a1a;
-  --t2:#6b6b6b;
-  --t3:#aeaeb2;
-  --font:'Plus Jakarta Sans',system-ui,sans-serif;
-  --nav-h:60px;
-  --tab-h:64px;
-  --r:16px;
-  --r-sm:10px;
+  --border:#e8e5e0;
+  --border-strong:#d0ccc5;
+  --t1:#1a1714;
+  --t2:#6b6660;
+  --t3:#b0ada8;
+  --font:'DM Sans',system-ui,sans-serif;
+  --font-display:'Playfair Display',serif;
+  --nav-h:62px;
+  --tab-h:66px;
+  --r:18px;
+  --r-sm:12px;
   --r-pill:100px;
-  --shadow:0 2px 16px rgba(0,0,0,.09);
-  --shadow-lg:0 8px 40px rgba(0,0,0,.14);
+  --shadow:0 2px 20px rgba(0,0,0,.07);
+  --shadow-lg:0 12px 48px rgba(0,0,0,.13);
+  --shadow-orange:0 6px 24px rgba(255,82,0,.22);
 }
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;height:100%}
 body{font-family:var(--font);background:var(--bg);color:var(--t1);-webkit-font-smoothing:antialiased;min-height:100dvh;overscroll-behavior:none}
@@ -308,13 +312,16 @@ a{text-decoration:none}
 @keyframes scaleUp{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
-@keyframes popBadge{0%,100%{transform:scale(1)}50%{transform:scale(1.3)}}
+@keyframes popBadge{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
 @keyframes toast{0%{transform:translate(-50%,10px);opacity:0}15%,85%{transform:translate(-50%,0);opacity:1}100%{transform:translate(-50%,-4px);opacity:0}}
+@keyframes heroSlide{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:scale(1)}}
+@keyframes heroTextIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes dotPulse{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.4);opacity:1}}
+@keyframes cardIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ripple{from{transform:scale(0);opacity:.5}to{transform:scale(2.5);opacity:0}}
 
-/* ── overlay + sheet (shared by all bottom panels) ── */
-.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.48);backdrop-filter:blur(2px);animation:fadeIn .2s ease}
-
-/* Mobile: slide up from bottom */
+/* ── overlay + sheet ── */
+.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.52);backdrop-filter:blur(3px);animation:fadeIn .2s ease}
 .sheet{
   position:fixed;bottom:0;left:0;right:0;z-index:301;
   background:var(--card);border-radius:var(--r) var(--r) 0 0;
@@ -322,141 +329,165 @@ a{text-decoration:none}
   animation:slideUp .32s cubic-bezier(.34,1.1,.64,1);
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
-
-/* Desktop: fixed center — no bottom/transform collision */
 @media(min-width:600px){
   .sheet{
     bottom:auto;top:50%;left:50%;
-    width:min(520px,92vw);
-    margin:0;
-    /* Use margin-top trick so transform is only translateX(-50%) translateY(-50%), stable from the start */
+    width:min(520px,92vw);margin:0;
     transform:translate(-50%,-50%);
-    border-radius:var(--r);
-    max-height:90dvh;
-    animation:sheetDesktop .2s cubic-bezier(.22,1,.36,1);
+    border-radius:var(--r);max-height:90dvh;
+    animation:sheetDesktop .22s cubic-bezier(.22,1,.36,1);
   }
 }
 @keyframes sheetDesktop{
-  from{opacity:0;transform:translate(-50%,-50%) scale(.96)}
+  from{opacity:0;transform:translate(-50%,-50%) scale(.95)}
   to{opacity:1;transform:translate(-50%,-50%) scale(1)}
 }
-.drag-pill{width:40px;height:4px;background:var(--border);border-radius:99px;margin:12px auto 0}
+.drag-pill{width:36px;height:3px;background:var(--border);border-radius:99px;margin:14px auto 0}
 
 /* ── spinner ── */
 .spin{display:inline-block;width:24px;height:24px;border:2.5px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .65s linear infinite}
 
 /* ── skeleton ── */
-.skel{background:linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%);background-size:400px 100%;animation:shimmer 1.4s infinite;border-radius:var(--r-sm)}
+.skel{background:linear-gradient(90deg,#eeebe7 25%,#e5e2de 50%,#eeebe7 75%);background-size:400px 100%;animation:shimmer 1.4s infinite;border-radius:var(--r-sm)}
 
 /* ── toast ── */
 .toast{
-  position:fixed;bottom:calc(var(--tab-h) + 12px);left:50%;
-  background:#1a1a1a;color:#fff;
-  padding:10px 20px;border-radius:var(--r-pill);
+  position:fixed;bottom:calc(var(--tab-h) + 14px);left:50%;
+  background:#1a1714;color:#fff;
+  padding:11px 22px;border-radius:var(--r-pill);
   font-size:13px;font-weight:600;z-index:9999;white-space:nowrap;
   animation:toast 2.6s ease forwards;pointer-events:none;
-  box-shadow:var(--shadow-lg);
+  box-shadow:var(--shadow-lg);letter-spacing:.01em;
 }
-@media(min-width:1024px){.toast{bottom:24px}}
+@media(min-width:1024px){.toast{bottom:28px}}
 
 /* ── top nav ── */
 .topnav{
   position:sticky;top:0;z-index:100;height:var(--nav-h);
   width:100%;
-  background:rgba(255,255,255,.96);backdrop-filter:blur(20px);
+  background:rgba(255,255,255,.97);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
   border-bottom:1px solid var(--border);
-  display:flex;align-items:center;padding:0 16px;gap:10px;
+  display:flex;align-items:center;padding:0 18px;gap:12px;
   box-sizing:border-box;
 }
+
 /* ── bottom tab bar (mobile only) ── */
 .tabbar{
   position:fixed;bottom:0;left:0;right:0;z-index:100;
-  height:var(--tab-h);background:var(--card);
-  border-top:1px solid var(--border);
+  height:var(--tab-h);background:rgba(255,255,255,.98);
+  border-top:1px solid var(--border);backdrop-filter:blur(20px);
   display:grid;grid-template-columns:repeat(3,1fr);
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
 @media(min-width:1024px){.tabbar{display:none}}
-.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:var(--t3);font-size:11px;font-weight:600;transition:color .15s}
+.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:var(--t3);font-size:10.5px;font-weight:600;transition:color .15s}
 .tab-item.on{color:var(--orange)}
 .tab-badge{position:absolute;top:-2px;right:-8px;background:var(--orange);color:#fff;border-radius:99px;min-width:16px;height:16px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:popBadge .25s ease}
 
-/* ── hero ── */
-.hero{position:relative;width:100%;background:#111;overflow:hidden}
-.hero img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
-.hero-grad{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.78) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}
-.hero-content{position:absolute;bottom:0;left:0;right:0;padding:16px 16px 20px;color:#fff}
+/* ── hero / slideshow ── */
+.hero{position:relative;width:100%;background:#1a1714;overflow:hidden}
+.hero-slide{position:absolute;inset:0;transition:opacity .9s cubic-bezier(.4,0,.2,1)}
+.hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
+.hero-slide-active{opacity:1;animation:heroSlide .9s cubic-bezier(.4,0,.2,1) forwards}
+.hero-slide-inactive{opacity:0}
+.hero-grad{position:absolute;inset:0;background:linear-gradient(175deg,rgba(0,0,0,.08) 0%,rgba(0,0,0,.28) 45%,rgba(0,0,0,.82) 100%)}
+.hero-content{position:absolute;bottom:0;left:0;right:0;padding:20px 20px 24px;color:#fff}
+.hero-title{font-family:var(--font-display);font-size:clamp(20px,5vw,30px);font-weight:800;line-height:1.15;margin-bottom:10px;animation:heroTextIn .6s .15s both}
+.hero-meta{display:flex;flex-wrap:wrap;gap:6px 14px;animation:heroTextIn .6s .28s both}
+.hero-meta-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:4px 11px;border-radius:var(--r-pill);backdrop-filter:blur(6px)}
+.hero-dots{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:5px;z-index:5}
+.hero-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.45);transition:all .3s;cursor:pointer;border:none}
+.hero-dot.on{background:#fff;width:18px;border-radius:3px}
+.hero-open-label{position:absolute;top:14px;left:14px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);backdrop-filter:blur(8px);color:#fff;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 12px;border-radius:var(--r-pill);animation:heroTextIn .4s .05s both}
 
 /* ── search bar ── */
 .search-bar{
   display:flex;align-items:center;gap:10px;
-  background:var(--card);border:1.5px solid var(--border);
-  border-radius:var(--r-pill);padding:0 16px;height:46px;
-  transition:border-color .15s,box-shadow .15s;
+  background:var(--bg);border:1.5px solid var(--border);
+  border-radius:var(--r-pill);padding:0 18px;height:48px;
+  transition:border-color .2s,box-shadow .2s,background .2s;
 }
-.search-bar:focus-within{border-color:#aaa;box-shadow:0 0 0 3px rgba(0,0,0,.06)}
-.search-bar input{flex:1;font-size:14px;color:var(--t1);border:none;background:none}
+.search-bar:focus-within{border-color:var(--border-strong);background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.search-bar input{flex:1;font-size:14px;color:var(--t1);border:none;background:none;font-weight:500}
 .search-bar input::placeholder{color:var(--t3)}
 
 /* ── category strip ── */
 .cat-strip{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.cat-chip{flex-shrink:0;padding:7px 16px;border-radius:var(--r-pill);border:1.5px solid var(--border);background:var(--card);color:var(--t2);font-size:13px;font-weight:600;white-space:nowrap;transition:all .15s;cursor:pointer}
-.cat-chip:hover{border-color:#bbb;color:var(--t1)}
-.cat-chip.on{background:var(--t1);color:#fff;border-color:var(--t1)}
+.cat-chip{
+  flex-shrink:0;padding:8px 18px;border-radius:var(--r-pill);
+  border:1.5px solid var(--border);background:var(--card);
+  color:var(--t2);font-size:13px;font-weight:600;white-space:nowrap;
+  transition:all .18s;cursor:pointer;letter-spacing:.01em;
+}
+.cat-chip:hover{border-color:var(--border-strong);color:var(--t1)}
+.cat-chip.on{background:var(--t1);color:#fff;border-color:var(--t1);box-shadow:0 2px 10px rgba(0,0,0,.15)}
 
 /* ── menu section ── */
 .section-hd{display:flex;align-items:center;justify-content:space-between;padding:4px 16px 12px}
-.section-title{font-size:16px;font-weight:700;color:var(--t1)}
+.section-title{font-size:17px;font-weight:800;color:var(--t1);font-family:var(--font-display)}
 .section-count{font-size:12px;font-weight:600;color:var(--t3)}
 
-/* ── menu card (default: swiggy-style list) ── */
+/* ── menu card ── */
 .menu-card{
   display:flex;align-items:flex-start;gap:14px;
-  background:var(--card);padding:16px;
+  background:var(--card);padding:16px 16px 14px;
   border-bottom:1px solid var(--border);
   cursor:pointer;position:relative;
-  transition:background .12s;
+  transition:background .15s;
 }
 .menu-card:last-child{border-bottom:none}
-.menu-card:active{background:#fafafa}
-.menu-thumb{width:96px;height:96px;border-radius:var(--r-sm);overflow:hidden;background:#f0f0f0;flex-shrink:0;position:relative}
-.menu-thumb img{width:100%;height:100%;object-fit:cover}
-.menu-thumb-empty{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:38px;color:var(--t3)}
+.menu-card:hover{background:#fdfcfb}
+.menu-card:active{background:#f9f8f6}
+.menu-thumb{
+  width:100px;height:100px;border-radius:14px;
+  overflow:hidden;background:#f0ede8;flex-shrink:0;position:relative;
+  box-shadow:0 2px 10px rgba(0,0,0,.08);
+}
+.menu-thumb img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
+.menu-card:hover .menu-thumb img{transform:scale(1.04)}
+.menu-thumb-empty{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:40px;color:var(--t3)}
 .menu-info{flex:1;min-width:0;padding-top:2px}
-.menu-name{font-size:14px;font-weight:700;color:var(--t1);line-height:1.3;margin-bottom:4px}
-.menu-desc{font-size:12.5px;color:var(--t2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}
-.menu-price{font-size:14.5px;font-weight:800;color:var(--t1)}
-.menu-popular{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:#e65c00;background:#fff3e0;padding:2px 7px;border-radius:4px;margin-bottom:5px}
+.menu-name{font-size:14.5px;font-weight:700;color:var(--t1);line-height:1.35;margin-bottom:4px;letter-spacing:-.01em}
+.menu-desc{font-size:12.5px;color:var(--t2);line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:9px}
+.menu-price{font-size:15px;font-weight:800;color:var(--t1);letter-spacing:-.01em}
+.menu-popular{
+  display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;
+  color:#c44d00;background:linear-gradient(135deg,#fff3e0,#ffe8cc);
+  padding:3px 8px;border-radius:5px;margin-bottom:6px;letter-spacing:.02em;
+  border:1px solid rgba(196,77,0,.15);
+}
 .menu-oos{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:var(--red);background:var(--red-l);padding:2px 8px;border-radius:4px;margin-left:6px}
 
 /* ── add button ── */
 .add-btn{
-  position:absolute;bottom:12px;right:12px;
-  width:32px;height:32px;border-radius:var(--r-sm);
-  background:var(--card);border:1.5px solid var(--orange);
+  position:absolute;bottom:14px;right:14px;
+  width:34px;height:34px;border-radius:10px;
+  background:#fff;border:1.5px solid var(--orange);
   color:var(--orange);display:flex;align-items:center;justify-content:center;
-  transition:all .15s;font-weight:800;box-shadow:0 2px 8px rgba(255,82,0,.15);
+  transition:all .18s;font-weight:800;
+  box-shadow:0 2px 10px rgba(255,82,0,.18);
 }
-.add-btn:hover{background:var(--orange);color:#fff}
+.add-btn:hover{background:var(--orange);color:#fff;transform:scale(1.08);box-shadow:var(--shadow-orange)}
+.add-btn:active{transform:scale(.96)}
 /* counter pill */
 .qty-pill{
-  position:absolute;bottom:12px;right:12px;
+  position:absolute;bottom:14px;right:14px;
   display:inline-flex;align-items:center;
-  background:var(--orange);border-radius:var(--r-sm);
-  overflow:hidden;height:32px;box-shadow:0 2px 8px rgba(255,82,0,.25);
+  background:var(--orange);border-radius:10px;
+  overflow:hidden;height:34px;box-shadow:var(--shadow-orange);
 }
-.qty-pill button{width:32px;height:32px;color:#fff;display:flex;align-items:center;justify-content:center;transition:background .12s}
+.qty-pill button{width:32px;height:34px;color:#fff;display:flex;align-items:center;justify-content:center;transition:background .12s}
 .qty-pill button:hover{background:rgba(255,255,255,.2)}
 .qty-pill span{min-width:26px;text-align:center;font-size:13px;font-weight:800;color:#fff}
 
 /* ── sheet header ── */
-.sheet-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px}
-.sheet-title{font-size:18px;font-weight:800;color:var(--t1)}
-.close-btn{width:32px;height:32px;border-radius:50%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--t2);transition:background .12s}
-.close-btn:hover{background:#ebebeb}
+.sheet-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 12px}
+.sheet-title{font-size:18px;font-weight:800;color:var(--t1);letter-spacing:-.02em}
+.close-btn{width:34px;height:34px;border-radius:50%;background:#f5f3f0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--t2);transition:all .15s}
+.close-btn:hover{background:#eceae6;color:var(--t1)}
 
 /* ── item detail sheet ── */
-.item-img-wrap{width:100%;aspect-ratio:4/3;overflow:hidden;background:#f0f0f0;position:relative;max-height:280px}
+.item-img-wrap{width:100%;aspect-ratio:4/3;overflow:hidden;background:#f0ede8;position:relative;max-height:280px}
 .item-img-wrap img{width:100%;height:100%;object-fit:cover}
 .item-img-empty{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:72px;color:var(--t3)}
 
@@ -466,8 +497,8 @@ a{text-decoration:none}
   padding:13px 16px;border:1.5px solid var(--border);border-radius:var(--r-sm);
   cursor:pointer;transition:all .15s;
 }
-.var-opt:hover{border-color:#bbb}
-.var-opt.sel{border-color:var(--t1);background:#fafafa}
+.var-opt:hover{border-color:var(--border-strong)}
+.var-opt.sel{border-color:var(--t1);background:#fafaf8}
 .var-dot{width:20px;height:20px;border-radius:50%;border:2px solid var(--border);transition:all .15s;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .var-dot.sq{border-radius:5px}
 .var-dot.sel{border-color:var(--t1);background:var(--t1)}
@@ -477,11 +508,11 @@ a{text-decoration:none}
 .cart-row:last-child{border-bottom:none}
 
 /* ── checkout ── */
-.addr-card{border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;cursor:pointer;transition:all .15s;margin-bottom:10px}
-.addr-card:hover{border-color:#bbb}
-.addr-card.sel{border-color:var(--orange);background:#fff9f6}
-.pay-opt{flex:1;border:2px solid var(--border);border-radius:var(--r-sm);padding:14px 8px;text-align:center;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px}
-.pay-opt.sel{border-color:var(--orange);background:#fff9f6}
+.addr-card{border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;cursor:pointer;transition:all .18s;margin-bottom:10px}
+.addr-card:hover{border-color:var(--border-strong)}
+.addr-card.sel{border-color:var(--orange);background:#fff9f6;box-shadow:0 2px 12px rgba(255,82,0,.1)}
+.pay-opt{flex:1;border:2px solid var(--border);border-radius:var(--r-sm);padding:14px 8px;text-align:center;cursor:pointer;transition:all .18s;display:flex;flex-direction:column;align-items:center;gap:4px}
+.pay-opt.sel{border-color:var(--orange);background:#fff9f6;box-shadow:0 2px 10px rgba(255,82,0,.1)}
 
 /* ── track dots ── */
 .track-step{display:flex;align-items:flex-start;gap:14px;position:relative}
@@ -498,21 +529,22 @@ a{text-decoration:none}
   display:flex;align-items:center;justify-content:center;gap:8px;
   width:100%;padding:15px;background:var(--orange);color:#fff;
   font-size:15px;font-weight:700;border-radius:var(--r);
-  transition:all .15s;cursor:pointer;border:none;font-family:var(--font);
+  transition:all .18s;cursor:pointer;border:none;font-family:var(--font);
+  letter-spacing:.01em;
 }
-.btn-primary:hover{background:var(--orange-d);transform:translateY(-1px);box-shadow:0 4px 16px rgba(255,82,0,.3)}
+.btn-primary:hover{background:var(--orange-d);transform:translateY(-1px);box-shadow:var(--shadow-orange)}
 .btn-primary:active{transform:none;box-shadow:none}
-.btn-primary:disabled{background:#d4d4d4;color:#aaa;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-primary:disabled{background:#dedad4;color:#aaa;cursor:not-allowed;transform:none;box-shadow:none}
 
 /* ── input ── */
-.inp{width:100%;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;color:var(--t1);background:#fff;transition:all .15s;font-family:var(--font)}
+.inp{width:100%;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;color:var(--t1);background:#fdfcfb;transition:all .18s;font-family:var(--font)}
 .inp::placeholder{color:var(--t3)}
-.inp:focus{border-color:var(--t1);box-shadow:0 0 0 3px rgba(0,0,0,.05)}
-.lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);margin-bottom:7px;display:block}
+.inp:focus{border-color:var(--t1);background:#fff;box-shadow:0 0 0 3px rgba(0,0,0,.04)}
+.lbl{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--t3);margin-bottom:7px;display:block}
 
 /* ── btn outline ── */
-.btn-out{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-weight:600;color:var(--t2);background:#fff;cursor:pointer;transition:all .15s;font-family:var(--font)}
-.btn-out:hover{border-color:var(--t1);color:var(--t1)}
+.btn-out{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-weight:600;color:var(--t2);background:#fff;cursor:pointer;transition:all .18s;font-family:var(--font)}
+.btn-out:hover{border-color:var(--border-strong);color:var(--t1)}
 
 /* ── modal qty control ── */
 .qty-ctrl{display:inline-flex;align-items:center;border:1.5px solid var(--border);border-radius:var(--r-pill);overflow:hidden}
@@ -642,6 +674,107 @@ const ErrScreen = ({ msg }) => (
     </p>
   </div>
 );
+
+/* ── HeroSlideshow ────────────────────────────────────────────────────────── */
+const FALLBACK_IMAGES = ["/image_1.jpg", "/image_2.jpg", "/image_3.jpg"];
+
+function HeroSlideshow({ restaurant }) {
+  const rawSlides = [
+    restaurant?.image1_path,
+    restaurant?.image2_path,
+    restaurant?.image3_path,
+  ];
+  // Build slides: use restaurant image if present, else corresponding fallback
+  const slides = rawSlides.map((src, i) => src || FALLBACK_IMAGES[i]);
+  // If all three are identical (all null → all same fallback), deduplicate
+  const uniqueSlides = [...new Set(slides)];
+
+  const [current, setCurrent] = useState(0);
+  const [imgErrors, setImgErrors] = useState({});
+  const timerRef = useRef(null);
+
+  const advance = useCallback((dir = 1) => {
+    setCurrent((c) => (c + dir + uniqueSlides.length) % uniqueSlides.length);
+  }, [uniqueSlides.length]);
+
+  useEffect(() => {
+    if (uniqueSlides.length <= 1) return;
+    timerRef.current = setInterval(() => advance(1), 4800);
+    return () => clearInterval(timerRef.current);
+  }, [advance, uniqueSlides.length]);
+
+  const handleImgError = (idx) => {
+    setImgErrors((prev) => ({ ...prev, [idx]: true }));
+  };
+
+  return (
+    <div className="hero" style={{ height: "clamp(200px, 42vw, 300px)" }}>
+      {/* Slides */}
+      {uniqueSlides.map((src, idx) => (
+        <div
+          key={idx}
+          className={`hero-slide ${idx === current ? "hero-slide-active" : "hero-slide-inactive"}`}
+          style={{ zIndex: idx === current ? 2 : 1 }}
+        >
+          {!imgErrors[idx] ? (
+            <img
+              src={src}
+              alt={restaurant?.name || "Restaurant"}
+              onError={() => handleImgError(idx)}
+              style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+            />
+          ) : (
+            <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#1a1714 0%,#2d2926 50%,#1a1714 100%)" }} />
+          )}
+        </div>
+      ))}
+
+      {/* Gradient overlay */}
+      <div className="hero-grad" style={{ zIndex: 3 }} />
+
+      {/* Open label */}
+      <div className="hero-open-label" style={{ zIndex: 5 }}>Now open</div>
+
+      {/* Content */}
+      <div className="hero-content" style={{ zIndex: 5 }}>
+        <h1 className="hero-title">{restaurant?.name}</h1>
+        <div className="hero-meta">
+          {restaurant?.working_hours && (
+            <span className="hero-meta-chip">
+              {Ic.clock} {restaurant.working_hours}
+            </span>
+          )}
+          {restaurant?.min_order && (
+            <span className="hero-meta-chip">
+              🔥 Min. {fmt(restaurant.min_order)}
+            </span>
+          )}
+          <span className="hero-meta-chip">
+            {Ic.truck} ~25 min
+          </span>
+        </div>
+      </div>
+
+      {/* Slide dots (only if more than one slide) */}
+      {uniqueSlides.length > 1 && (
+        <div className="hero-dots" style={{ zIndex: 5 }}>
+          {uniqueSlides.map((_, idx) => (
+            <button
+              key={idx}
+              className={`hero-dot${idx === current ? " on" : ""}`}
+              onClick={() => {
+                clearInterval(timerRef.current);
+                setCurrent(idx);
+                timerRef.current = setInterval(() => advance(1), 4800);
+              }}
+              aria-label={`Slide ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ── Load Leaflet from CDN (once) ─────────────────────────────────────────── */
 let leafletLoaded = false;
@@ -2361,13 +2494,13 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
                 background:
                   liveStatus === "delivered"
                     ? "var(--green-l)"
-                    : liveStatus === "rejected"
+                    : liveStatus === "rejected" || liveStatus === "cancelled"
                       ? "var(--red-l)"
                       : "#fff0e8",
                 color:
                   liveStatus === "delivered"
                     ? "var(--green)"
-                    : liveStatus === "rejected"
+                    : liveStatus === "rejected" || liveStatus === "cancelled"
                       ? "var(--red)"
                       : "var(--orange)",
               }}
@@ -2376,13 +2509,15 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
                 ? "Delivered ✅"
                 : liveStatus === "rejected"
                   ? "Rejected"
-                  : liveStatus === "on_the_way"
-                    ? "On the way 🛵"
-                    : liveStatus === "preparing"
-                      ? "Preparing 👨‍🍳"
-                      : liveStatus === "accepted"
-                        ? "Accepted"
-                        : "Pending"}
+                  : liveStatus === "cancelled"
+                    ? "Cancelled"
+                    : liveStatus === "on_the_way"
+                      ? "On the way 🛵"
+                      : liveStatus === "preparing"
+                        ? "Preparing 👨‍🍳"
+                        : liveStatus === "accepted"
+                          ? "Accepted"
+                          : "Pending"}
             </span>
           </div>
 
@@ -2413,8 +2548,35 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
             </div>
           )}
 
+          {/* Cancelled banner */}
+          {liveStatus === "cancelled" && (
+            <div
+              style={{
+                background: "var(--red-l)",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "12px 14px",
+                marginBottom: 20,
+              }}
+            >
+              <p
+                style={{
+                  fontWeight: 700,
+                  fontSize: 14,
+                  color: "var(--red)",
+                  marginBottom: 4,
+                }}
+              >
+                Order cancelled
+              </p>
+              <p style={{ fontSize: 13, color: "var(--t2)" }}>
+                You cancelled this order before the restaurant accepted it.
+              </p>
+            </div>
+          )}
+
           {/* Steps */}
-          {liveStatus !== "rejected" && (
+          {liveStatus !== "rejected" && liveStatus !== "cancelled" && (
             <div style={{ marginBottom: 24 }}>
               {steps.map((s, i) => {
                 const n = i + 1,
@@ -2719,7 +2881,9 @@ function ProfileSheet({
       ? "var(--orange)"
       : s === "delivered"
         ? "var(--green)"
-        : "var(--t3)";
+        : s === "cancelled"
+          ? "var(--red)"
+          : "var(--t3)";
 
   return (
     <>
@@ -3265,7 +3429,9 @@ function ProfileSheet({
                                 ? "#fff0e8"
                                 : o.status === "delivered"
                                   ? "var(--green-l)"
-                                  : "#f5f5f5",
+                                  : o.status === "cancelled"
+                                    ? "var(--red-l)"
+                                    : "#f5f5f5",
                               padding: "3px 9px",
                               borderRadius: 99,
                             }}
@@ -3540,21 +3706,22 @@ function DesktopCart({
         style={{
           padding: "18px 20px 14px",
           borderBottom: "1px solid var(--border)",
+          background: "var(--card)",
         }}
       >
         <p
           style={{
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: 700,
             color: "var(--t3)",
             textTransform: "uppercase",
-            letterSpacing: ".06em",
-            marginBottom: 2,
+            letterSpacing: ".1em",
+            marginBottom: 3,
           }}
         >
           {restaurant?.name}
         </p>
-        <h3 style={{ fontSize: 18, fontWeight: 800 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-display)", letterSpacing: "-.02em" }}>
           Your order {totalItems > 0 ? `(${totalItems})` : ""}
         </h3>
       </div>
@@ -4576,13 +4743,16 @@ export default function Customer() {
               width: 40,
               height: 40,
               borderRadius: "50%",
-              background: "#f5f5f5",
+              background: "var(--bg)",
+              border: "1.5px solid var(--border)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               color: "var(--t2)",
-              transition: "background .15s",
+              transition: "all .18s",
             }}
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--card)"; e.currentTarget.style.borderColor = "var(--border-strong)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.borderColor = "var(--border)"; }}
           >
             {Ic.user}
           </button>
@@ -4593,12 +4763,13 @@ export default function Customer() {
               width: 40,
               height: 40,
               borderRadius: "50%",
-              background: "#f5f5f5",
+              background: cartCount > 0 ? "var(--orange)" : "var(--bg)",
+              border: `1.5px solid ${cartCount > 0 ? "var(--orange)" : "var(--border)"}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "var(--t2)",
-              transition: "background .15s",
+              color: cartCount > 0 ? "#fff" : "var(--t2)",
+              transition: "all .2s",
             }}
           >
             {Ic.cart}
@@ -4623,97 +4794,11 @@ export default function Customer() {
       <div className="page-wrap">
         {/* MAIN COLUMN */}
         <div className="main-col">
-          {/* HERO */}
-          <div className="hero" style={{ height: "clamp(180px, 38vw, 280px)" }}>
-            {restaurant?.image1_path ? (
-              <img
-                src={restaurant.image1_path}
-                alt={restaurant.name}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                onError={(e) => (e.target.style.display = "none")}
-              />
-            ) : (
-              <div
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  background: "linear-gradient(135deg,#1a1a1a,#333)",
-                }}
-              />
-            )}
-            <div className="hero-grad" />
-            <div className="hero-content">
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: ".14em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,255,255,.55)",
-                  marginBottom: 4,
-                }}
-              >
-                Now open
-              </p>
-              <h1
-                style={{
-                  fontSize: "clamp(18px,4vw,26px)",
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  marginBottom: 10,
-                }}
-              >
-                {restaurant?.name}
-              </h1>
-              <div
-                style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}
-              >
-                {restaurant?.working_hours && (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      fontSize: 12,
-                      color: "rgba(255,255,255,.8)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {Ic.clock} {restaurant.working_hours}
-                  </span>
-                )}
-                {restaurant?.min_order && (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      fontSize: 12,
-                      color: "rgba(255,255,255,.8)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    🔥 Min. {fmt(restaurant.min_order)}
-                  </span>
-                )}
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    fontSize: 12,
-                    color: "rgba(255,255,255,.8)",
-                    fontWeight: 500,
-                  }}
-                >
-                  {Ic.truck} ~25 min
-                </span>
-              </div>
-            </div>
-          </div>
+          {/* HERO SLIDESHOW */}
+          <HeroSlideshow restaurant={restaurant} />
 
           {/* SEARCH */}
-          <div style={{ padding: "14px 16px 0", background: "var(--card)" }}>
+          <div style={{ padding: "16px 16px 0", background: "var(--card)" }}>
             <div className="search-bar">
               <span style={{ color: "var(--t3)", flexShrink: 0 }}>
                 {Ic.search}
@@ -4970,12 +5055,14 @@ export default function Customer() {
                   }}
                 >
                   {cat && (
-                    <div style={{ padding: "18px 16px 4px" }}>
+                    <div style={{ padding: "20px 16px 6px" }}>
                       <h2
                         style={{
                           fontSize: 18,
                           fontWeight: 800,
                           color: "var(--t1)",
+                          fontFamily: "var(--font-display)",
+                          letterSpacing: "-.02em",
                         }}
                       >
                         {cat.name}
@@ -5014,7 +5101,7 @@ export default function Customer() {
                     justifyContent: "space-between",
                   }}
                 >
-                  <h2 style={{ fontSize: 18, fontWeight: 800 }}>{catLabel}</h2>
+                  <h2 style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-display)", letterSpacing: "-.02em" }}>{catLabel}</h2>
                   <span
                     style={{
                       fontSize: 12,
@@ -5299,6 +5386,7 @@ function OrderDetailSheet({ order, onClose }) {
     on_the_way: "On the way 🛵",
     delivered: "Delivered ✅",
     rejected: "Rejected",
+    cancelled: "Cancelled",
   };
   const STATUS_COLORS = {
     pending: "var(--orange)",
@@ -5307,10 +5395,50 @@ function OrderDetailSheet({ order, onClose }) {
     on_the_way: "var(--green)",
     delivered: "var(--green)",
     rejected: "var(--red)",
+    cancelled: "var(--red)",
   };
 
   const ACTIVE = ["pending", "accepted", "preparing", "on_the_way"];
   const isActive = ACTIVE.includes(liveOrder.status);
+
+  // Cancellation logic
+  // Only cancellable if order is still pending (restaurant hasn't accepted yet)
+  const canCancel = liveOrder.status === "pending";
+  const isCancelled = liveOrder.status === "cancelled";
+  const isAlreadyClosedForCancel = ["accepted", "preparing", "on_the_way", "delivered", "rejected"].includes(liveOrder.status);
+
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState("");
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    setCancelErr("");
+    try {
+      const { error } = await supabase
+        .from("Orders")
+        .update({ status: "cancelled" })
+        .eq("id", liveOrder.id)
+        .eq("status", "pending"); // safety: only cancel if still pending
+      if (error) throw error;
+      // Verify the update happened (status may have changed server-side)
+      const { data: fresh } = await supabase
+        .from("Orders")
+        .select("status")
+        .eq("id", liveOrder.id)
+        .single();
+      if (fresh?.status !== "cancelled") {
+        setCancelErr("Your order was already accepted by the restaurant and can no longer be cancelled.");
+      } else {
+        setLiveOrder((prev) => ({ ...prev, status: "cancelled" }));
+      }
+    } catch (e) {
+      setCancelErr("Failed to cancel order. Please try again.");
+    } finally {
+      setCancelling(false);
+      setShowCancelConfirm(false);
+    }
+  };
 
   // Computed breakdown values
   const itemsSubtotal = items.reduce(
@@ -5355,7 +5483,9 @@ function OrderDetailSheet({ order, onClose }) {
                   ? "#fff0e8"
                   : liveOrder.status === "delivered"
                     ? "#f0fdf4"
-                    : "#f5f5f5",
+                    : liveOrder.status === "cancelled"
+                      ? "#fdecea"
+                      : "#f5f5f5",
                 color: STATUS_COLORS[liveOrder.status] || "var(--t2)",
               }}
             >
@@ -5669,22 +5799,131 @@ function OrderDetailSheet({ order, onClose }) {
           </div>
         </div>
 
-        {/* Close footer */}
+        {/* Close / Cancel footer */}
         <div
           style={{
             padding: "14px 20px",
             borderTop: "1px solid var(--border)",
             paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))",
             flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
           }}
         >
-          <button
-            className="btn-out"
-            style={{ width: "100%", justifyContent: "center" }}
-            onClick={onClose}
-          >
-            Close
-          </button>
+          {/* Cancel error */}
+          {cancelErr && (
+            <div
+              style={{
+                background: "#fdecea",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "var(--red)",
+                fontWeight: 500,
+              }}
+            >
+              ⚠️ {cancelErr}
+            </div>
+          )}
+
+          {/* Cancel confirm prompt */}
+          {showCancelConfirm && (
+            <div
+              style={{
+                background: "#fdecea",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "12px 14px",
+              }}
+            >
+              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--red)", marginBottom: 8 }}>
+                Cancel this order?
+              </p>
+              <p style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12, lineHeight: 1.5 }}>
+                This cannot be undone. The restaurant will be notified.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn-out"
+                  style={{ flex: 1 }}
+                  onClick={() => setShowCancelConfirm(false)}
+                  disabled={cancelling}
+                >
+                  Keep order
+                </button>
+                <button
+                  style={{
+                    flex: 1,
+                    padding: "11px 0",
+                    borderRadius: "var(--r-sm)",
+                    background: "var(--red)",
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    border: "none",
+                    cursor: cancelling ? "not-allowed" : "pointer",
+                    opacity: cancelling ? 0.7 : 1,
+                    fontFamily: "var(--font)",
+                  }}
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                >
+                  {cancelling ? "Cancelling…" : "Yes, cancel"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10 }}>
+            {/* Show cancel button only if order is still pending */}
+            {canCancel && !showCancelConfirm && (
+              <button
+                style={{
+                  flex: 1,
+                  padding: "11px 0",
+                  borderRadius: "var(--r-sm)",
+                  background: "none",
+                  border: "1.5px solid var(--red)",
+                  color: "var(--red)",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  fontFamily: "var(--font)",
+                  transition: "opacity .15s",
+                }}
+                onClick={() => { setCancelErr(""); setShowCancelConfirm(true); }}
+              >
+                ✕ Cancel order
+              </button>
+            )}
+            {/* Informational notice if order was accepted and cannot be cancelled */}
+            {isAlreadyClosedForCancel && !isCancelled && (
+              <div
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: "var(--r-sm)",
+                  background: "#f0f4ff",
+                  border: "1px solid #bfdbfe",
+                  fontSize: 12,
+                  color: "#2563EB",
+                  fontWeight: 500,
+                  textAlign: "center",
+                }}
+              >
+                ℹ️ Order accepted — cancellation not available
+              </div>
+            )}
+            <button
+              className="btn-out"
+              style={{ flex: 1, justifyContent: "center" }}
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </>
