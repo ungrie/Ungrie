@@ -2747,6 +2747,7 @@ function ProfileSheet({
   onSetDefault,
   defaultAddrId,
   onLoadOrders,
+  onLogout,
 }) {
   const [tab, setTab] = useState("info");
   const [form, setForm] = useState({
@@ -2755,6 +2756,7 @@ function ProfileSheet({
   });
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [selOrder, setSelOrder] = useState(null); // order detail sheet
 
   // Address editing state
@@ -3035,6 +3037,98 @@ function ProfileSheet({
               >
                 {saving ? <Spinner size={20} /> : "Save profile"}
               </button>
+
+              {/* ── Logout ── */}
+              <div
+                style={{
+                  marginTop: 8,
+                  paddingTop: 20,
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {!logoutConfirm ? (
+                  <button
+                    onClick={() => setLogoutConfirm(true)}
+                    style={{
+                      width: "100%",
+                      padding: "11px 0",
+                      borderRadius: "var(--r-sm)",
+                      background: "none",
+                      border: "1.5px solid var(--border)",
+                      color: "var(--t2)",
+                      fontWeight: 600,
+                      fontSize: 14,
+                      cursor: "pointer",
+                      fontFamily: "var(--font)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      transition: "border-color .15s, color .15s",
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = "var(--red)";
+                      e.currentTarget.style.color = "var(--red)";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = "var(--border)";
+                      e.currentTarget.style.color = "var(--t2)";
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                      <polyline points="16 17 21 12 16 7"/>
+                      <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    Sign out
+                  </button>
+                ) : (
+                  <div
+                    style={{
+                      background: "var(--red-l)",
+                      border: "1px solid #fca5a5",
+                      borderRadius: "var(--r-sm)",
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <p style={{ fontWeight: 700, fontSize: 14, color: "var(--red)", marginBottom: 5 }}>
+                      Sign out?
+                    </p>
+                    <p style={{ fontSize: 13, color: "var(--t2)", marginBottom: 14, lineHeight: 1.5 }}>
+                      You'll need to enter your number again to place orders.
+                    </p>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        className="btn-out"
+                        style={{ flex: 1 }}
+                        onClick={() => setLogoutConfirm(false)}
+                      >
+                        Stay
+                      </button>
+                      <button
+                        style={{
+                          flex: 1,
+                          padding: "11px 0",
+                          borderRadius: "var(--r-sm)",
+                          background: "var(--red)",
+                          color: "#fff",
+                          fontWeight: 700,
+                          fontSize: 14,
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: "var(--font)",
+                        }}
+                        onClick={() => {
+                          setLogoutConfirm(false);
+                          if (onLogout) onLogout();
+                        }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -4678,6 +4772,35 @@ export default function Customer() {
     showToast("Default address updated");
   };
 
+  /* ── Logout: clear localStorage, reset all customer state ── */
+  const handleLogout = () => {
+    try {
+      // Remove the restaurant-specific customer key
+      localStorage.removeItem(custKey(restId));
+      // Also clean up the default address preference for this customer
+      if (customer?.id) {
+        localStorage.removeItem(`frt_def_addr_${customer.id}`);
+      }
+    } catch (e) {
+      // localStorage may be unavailable in private browsing — proceed anyway
+      console.warn("[logout] localStorage error:", e);
+    }
+    // Reset all customer + UI state so PhoneOnboarding is shown
+    setCustomer(null);
+    setAddresses([]);
+    setDefaultAddrId(null);
+    setOrderHistory([]);
+    setCart([]);
+    setAddonCart([]);
+    setCartNote("");
+    setAppliedDiscount(null);
+    setLastOrder(null);
+    setShowCart(false);
+    setShowProfile(false);
+    setShowCheckout(false);
+    setShowTrack(false);
+  };
+
   if (loading || !custReady) return <LoadScreen />;
   if (error) return <ErrScreen msg={error} />;
 
@@ -5316,6 +5439,7 @@ export default function Customer() {
           onSetDefault={setDefaultAddress}
           defaultAddrId={defaultAddrId}
           onLoadOrders={() => loadOrderHistory(customer?.id)}
+          onLogout={handleLogout}
         />
       )}
     </>
