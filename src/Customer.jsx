@@ -645,6 +645,77 @@ a{text-decoration:none}
 .country-opt:hover{background:#f5f5f5}
 .country-search{width:100%;padding:10px 14px;border:none;border-bottom:1px solid var(--border);font-size:13px;font-family:var(--font);outline:none;color:var(--t1)}
 
+/* ── hero logo ── */
+.hero-logo-wrap{
+  display:flex;align-items:flex-end;gap:14px;margin-bottom:10px;
+  animation:heroTextIn .6s .12s both;
+}
+.hero-logo-img{
+  width:clamp(52px,13vw,72px);height:clamp(52px,13vw,72px);
+  border-radius:14px;object-fit:contain;background:rgba(255,255,255,.12);
+  border:1.5px solid rgba(255,255,255,.22);backdrop-filter:blur(8px);
+  flex-shrink:0;padding:4px;box-shadow:0 4px 18px rgba(0,0,0,.28);
+}
+.hero-logo-text{
+  display:flex;flex-direction:column;gap:3px;min-width:0;
+}
+.hero-logo-name{
+  font-family:var(--font-display);font-size:clamp(19px,5vw,30px);
+  font-weight:800;line-height:1.1;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.35);
+}
+.hero-logo-branch{
+  font-size:clamp(11px,2.5vw,13px);font-weight:600;color:rgba(255,255,255,.78);
+  letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.3);
+}
+
+/* ── restaurant info strip ── */
+.rest-info-strip{
+  background:var(--card);
+  border-bottom:1px solid var(--border);
+  padding:0;
+  overflow:hidden;
+}
+.rest-info-bar{
+  display:flex;align-items:center;gap:0;
+  padding:12px 16px;gap:16px;flex-wrap:wrap;
+}
+.rest-info-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12.5px;font-weight:500;color:var(--t2);
+  cursor:default;flex-shrink:0;
+}
+.rest-info-chip a{color:var(--orange);font-weight:600;text-decoration:none;}
+.rest-info-chip a:hover{text-decoration:underline}
+.rest-map-toggle{
+  margin-left:auto;
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:700;color:var(--orange);
+  background:var(--orange-l);border:1.5px solid rgba(255,82,0,.18);
+  border-radius:var(--r-pill);padding:5px 12px;cursor:pointer;
+  transition:all .18s;white-space:nowrap;flex-shrink:0;
+}
+.rest-map-toggle:hover{background:rgba(255,82,0,.14);border-color:rgba(255,82,0,.32)}
+.rest-map-panel{
+  overflow:hidden;
+  max-height:0;
+  transition:max-height .45s cubic-bezier(.4,0,.2,1), opacity .35s ease;
+  opacity:0;
+}
+.rest-map-panel.open{
+  max-height:260px;
+  opacity:1;
+}
+.rest-map-inner{
+  height:220px;
+  border-top:1px solid var(--border);
+  position:relative;
+}
+#rest-leaflet-map{width:100%;height:100%}
+@media(min-width:480px){
+  .rest-map-panel.open{ max-height:280px; }
+  .rest-map-inner{ height:240px; }
+}
+
 /* ── order history ── */
 .order-card{border:1.5px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:border-color .15s,background .15s}
 .order-card:hover{border-color:#bbb}
@@ -704,6 +775,7 @@ function HeroSlideshow({ restaurant }) {
 
   const [current, setCurrent] = useState(0);
   const [imgErrors, setImgErrors] = useState({});
+  const [logoErr, setLogoErr] = useState(false);
   const timerRef = useRef(null);
 
   const advance = useCallback((dir = 1) => {
@@ -750,7 +822,23 @@ function HeroSlideshow({ restaurant }) {
 
       {/* Content */}
       <div className="hero-content" style={{ zIndex: 5 }}>
-        <h1 className="hero-title">{restaurant?.name}</h1>
+        {/* Logo + name row */}
+        <div className="hero-logo-wrap">
+          {restaurant?.logo_path && !logoErr ? (
+            <img
+              src={restaurant.logo_path}
+              alt={restaurant?.name}
+              className="hero-logo-img"
+              onError={() => setLogoErr(true)}
+            />
+          ) : null}
+          <div className="hero-logo-text">
+            <span className="hero-logo-name">{restaurant?.name}</span>
+            {restaurant?.branch_name && (
+              <span className="hero-logo-branch">{restaurant.branch_name}</span>
+            )}
+          </div>
+        </div>
         <div className="hero-meta">
           {restaurant?.working_hours && (
             <span className="hero-meta-chip">
@@ -786,6 +874,186 @@ function HeroSlideshow({ restaurant }) {
         </div>
       )}
     </div>
+  );
+}
+
+/* ── RestaurantInfoStrip ──────────────────────────────────────────────────── */
+function RestaurantInfoStrip({ restaurant }) {
+  const [mapOpen, setMapOpen] = useState(false);
+  const mapRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const markerRef = useRef(null);
+
+  const lat = Number(restaurant?.latitude);
+  const lng = Number(restaurant?.longitude);
+  const hasLocation = lat && lng && !isNaN(lat) && !isNaN(lng);
+
+  // Init / destroy Leaflet map when panel opens/closes
+  useEffect(() => {
+    if (!mapOpen || !hasLocation) return;
+
+    // Small delay so the CSS transition has started and the container has height
+    const timer = setTimeout(() => {
+      if (!mapRef.current) return;
+      if (leafletMapRef.current) return; // already init
+
+      loadLeaflet(() => {
+        const L = window.L;
+        if (!L || !mapRef.current) return;
+
+        const map = L.map(mapRef.current, {
+          zoomControl: true,
+          scrollWheelZoom: false,
+          dragging: true,
+          tap: true,
+        }).setView([lat, lng], 15);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OSM contributors",
+          maxZoom: 19,
+        }).addTo(map);
+
+        // Animated pulsing marker
+        const pulseIcon = L.divIcon({
+          html: `<div style="
+            position:relative;width:32px;height:32px;
+            display:flex;align-items:center;justify-content:center;
+          ">
+            <div style="
+              position:absolute;width:32px;height:32px;border-radius:50%;
+              background:rgba(255,82,0,.25);
+              animation:mapPulse 1.8s ease-out infinite;
+            "></div>
+            <div style="
+              width:16px;height:16px;border-radius:50%;
+              background:var(--orange,#ff5200);
+              border:2.5px solid #fff;
+              box-shadow:0 2px 8px rgba(255,82,0,.5);
+              position:relative;z-index:1;
+            "></div>
+          </div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          className: "",
+        });
+
+        const marker = L.marker([lat, lng], { icon: pulseIcon }).addTo(map);
+        const popupText = [
+          `<strong>${restaurant?.name || ""}${restaurant?.branch_name ? " · " + restaurant.branch_name : ""}</strong>`,
+          restaurant?.address || "",
+        ].filter(Boolean).join("<br/>");
+        if (popupText) marker.bindPopup(popupText).openPopup();
+
+        leafletMapRef.current = map;
+        markerRef.current = marker;
+      });
+    }, 80);
+
+    return () => {
+      clearTimeout(timer);
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove();
+        leafletMapRef.current = null;
+        markerRef.current = null;
+      }
+    };
+  }, [mapOpen]); // eslint-disable-line
+
+  const hasInfo = restaurant?.address || restaurant?.ph_no;
+  if (!hasInfo && !hasLocation) return null;
+
+  return (
+    <>
+      {/* Inject pulse animation keyframe once */}
+      <style>{`
+        @keyframes mapPulse {
+          0% { transform: scale(1); opacity: .7; }
+          70% { transform: scale(2.4); opacity: 0; }
+          100% { transform: scale(1); opacity: 0; }
+        }
+      `}</style>
+
+      <div className="rest-info-strip">
+        {/* Info bar */}
+        <div className="rest-info-bar">
+          {/* Address */}
+          {restaurant?.address && (
+            <span className="rest-info-chip">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ color: "var(--orange)", flexShrink: 0 }}>
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+              </svg>
+              {restaurant.address}
+            </span>
+          )}
+
+          {/* Phone */}
+          {restaurant?.ph_no && (
+            <span className="rest-info-chip">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--orange)", flexShrink: 0 }}>
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.18 6.18l1.08-.93a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+              </svg>
+              <a href={`tel:${restaurant.ph_no}`}>{restaurant.ph_no}</a>
+            </span>
+          )}
+
+          {/* Map toggle — only if we have coordinates */}
+          {hasLocation && (
+            <button
+              className="rest-map-toggle"
+              onClick={() => setMapOpen((o) => !o)}
+              aria-expanded={mapOpen}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                {mapOpen
+                  ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
+                  : <><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/></>
+                }
+              </svg>
+              {mapOpen ? "Close map" : "View map"}
+            </button>
+          )}
+        </div>
+
+        {/* Animated map panel */}
+        {hasLocation && (
+          <div className={`rest-map-panel${mapOpen ? " open" : ""}`}>
+            <div className="rest-map-inner">
+              <div ref={mapRef} id="rest-leaflet-map" />
+              {/* "Get directions" overlay link */}
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  position: "absolute",
+                  bottom: 10,
+                  right: 10,
+                  zIndex: 1000,
+                  background: "#fff",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--r-pill)",
+                  padding: "5px 12px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--orange)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  boxShadow: "0 2px 8px rgba(0,0,0,.12)",
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                </svg>
+                Get directions ↗
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -2747,7 +3015,6 @@ function ProfileSheet({
   onSetDefault,
   defaultAddrId,
   onLoadOrders,
-  onLogout,
 }) {
   const [tab, setTab] = useState("info");
   const [form, setForm] = useState({
@@ -2756,7 +3023,6 @@ function ProfileSheet({
   });
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
-  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [selOrder, setSelOrder] = useState(null); // order detail sheet
 
   // Address editing state
@@ -3037,98 +3303,6 @@ function ProfileSheet({
               >
                 {saving ? <Spinner size={20} /> : "Save profile"}
               </button>
-
-              {/* ── Logout ── */}
-              <div
-                style={{
-                  marginTop: 8,
-                  paddingTop: 20,
-                  borderTop: "1px solid var(--border)",
-                }}
-              >
-                {!logoutConfirm ? (
-                  <button
-                    onClick={() => setLogoutConfirm(true)}
-                    style={{
-                      width: "100%",
-                      padding: "11px 0",
-                      borderRadius: "var(--r-sm)",
-                      background: "none",
-                      border: "1.5px solid var(--border)",
-                      color: "var(--t2)",
-                      fontWeight: 600,
-                      fontSize: 14,
-                      cursor: "pointer",
-                      fontFamily: "var(--font)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                      transition: "border-color .15s, color .15s",
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.borderColor = "var(--red)";
-                      e.currentTarget.style.color = "var(--red)";
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.borderColor = "var(--border)";
-                      e.currentTarget.style.color = "var(--t2)";
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                      <polyline points="16 17 21 12 16 7"/>
-                      <line x1="21" y1="12" x2="9" y2="12"/>
-                    </svg>
-                    Sign out
-                  </button>
-                ) : (
-                  <div
-                    style={{
-                      background: "var(--red-l)",
-                      border: "1px solid #fca5a5",
-                      borderRadius: "var(--r-sm)",
-                      padding: "14px 16px",
-                    }}
-                  >
-                    <p style={{ fontWeight: 700, fontSize: 14, color: "var(--red)", marginBottom: 5 }}>
-                      Sign out?
-                    </p>
-                    <p style={{ fontSize: 13, color: "var(--t2)", marginBottom: 14, lineHeight: 1.5 }}>
-                      You'll need to enter your number again to place orders.
-                    </p>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button
-                        className="btn-out"
-                        style={{ flex: 1 }}
-                        onClick={() => setLogoutConfirm(false)}
-                      >
-                        Stay
-                      </button>
-                      <button
-                        style={{
-                          flex: 1,
-                          padding: "11px 0",
-                          borderRadius: "var(--r-sm)",
-                          background: "var(--red)",
-                          color: "#fff",
-                          fontWeight: 700,
-                          fontSize: 14,
-                          border: "none",
-                          cursor: "pointer",
-                          fontFamily: "var(--font)",
-                        }}
-                        onClick={() => {
-                          setLogoutConfirm(false);
-                          if (onLogout) onLogout();
-                        }}
-                      >
-                        Sign out
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -4772,35 +4946,6 @@ export default function Customer() {
     showToast("Default address updated");
   };
 
-  /* ── Logout: clear localStorage, reset all customer state ── */
-  const handleLogout = () => {
-    try {
-      // Remove the restaurant-specific customer key
-      localStorage.removeItem(custKey(restId));
-      // Also clean up the default address preference for this customer
-      if (customer?.id) {
-        localStorage.removeItem(`frt_def_addr_${customer.id}`);
-      }
-    } catch (e) {
-      // localStorage may be unavailable in private browsing — proceed anyway
-      console.warn("[logout] localStorage error:", e);
-    }
-    // Reset all customer + UI state so PhoneOnboarding is shown
-    setCustomer(null);
-    setAddresses([]);
-    setDefaultAddrId(null);
-    setOrderHistory([]);
-    setCart([]);
-    setAddonCart([]);
-    setCartNote("");
-    setAppliedDiscount(null);
-    setLastOrder(null);
-    setShowCart(false);
-    setShowProfile(false);
-    setShowCheckout(false);
-    setShowTrack(false);
-  };
-
   if (loading || !custReady) return <LoadScreen />;
   if (error) return <ErrScreen msg={error} />;
 
@@ -4956,6 +5101,9 @@ export default function Customer() {
         <div className="main-col">
           {/* HERO SLIDESHOW */}
           <HeroSlideshow restaurant={restaurant} />
+
+          {/* RESTAURANT INFO STRIP */}
+          <RestaurantInfoStrip restaurant={restaurant} />
 
           {/* SEARCH */}
           <div style={{ padding: "16px 16px 0", background: "var(--card)" }}>
@@ -5439,7 +5587,6 @@ export default function Customer() {
           onSetDefault={setDefaultAddress}
           defaultAddrId={defaultAddrId}
           onLoadOrders={() => loadOrderHistory(customer?.id)}
-          onLogout={handleLogout}
         />
       )}
     </>
