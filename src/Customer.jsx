@@ -759,7 +759,12 @@ const ErrScreen = ({ msg }) => (
 );
 
 /* ── HeroSlideshow ────────────────────────────────────────────────────────── */
-const FALLBACK_IMAGES = ["/image_1.jpg", "/image_2.jpg", "/image_3.jpg", "/image_4.jpg"];
+const FALLBACK_IMAGES = [
+  "/image_1.jpg",
+  "/image_2.jpg",
+  "/image_3.jpg",
+  "/image_4.jpg",
+];
 
 function HeroSlideshow({ restaurant }) {
   const rawSlides = [
@@ -778,9 +783,12 @@ function HeroSlideshow({ restaurant }) {
   const [logoErr, setLogoErr] = useState(false);
   const timerRef = useRef(null);
 
-  const advance = useCallback((dir = 1) => {
-    setCurrent((c) => (c + dir + uniqueSlides.length) % uniqueSlides.length);
-  }, [uniqueSlides.length]);
+  const advance = useCallback(
+    (dir = 1) => {
+      setCurrent((c) => (c + dir + uniqueSlides.length) % uniqueSlides.length);
+    },
+    [uniqueSlides.length],
+  );
 
   useEffect(() => {
     if (uniqueSlides.length <= 1) return;
@@ -806,10 +814,23 @@ function HeroSlideshow({ restaurant }) {
               src={src}
               alt={restaurant?.name || "Restaurant"}
               onError={() => handleImgError(idx)}
-              style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center",
+                display: "block",
+              }}
             />
           ) : (
-            <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#1a1714 0%,#2d2926 50%,#1a1714 100%)" }} />
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                background:
+                  "linear-gradient(135deg,#1a1714 0%,#2d2926 50%,#1a1714 100%)",
+              }}
+            />
           )}
         </div>
       ))}
@@ -818,7 +839,9 @@ function HeroSlideshow({ restaurant }) {
       <div className="hero-grad" style={{ zIndex: 3 }} />
 
       {/* Open label */}
-      <div className="hero-open-label" style={{ zIndex: 5 }}>Now open</div>
+      <div className="hero-open-label" style={{ zIndex: 5 }}>
+        Now open
+      </div>
 
       {/* Content */}
       <div className="hero-content" style={{ zIndex: 5 }}>
@@ -850,9 +873,7 @@ function HeroSlideshow({ restaurant }) {
               🔥 Min. {fmt(restaurant.min_order)}
             </span>
           )}
-          <span className="hero-meta-chip">
-            {Ic.truck} ~25 min
-          </span>
+          <span className="hero-meta-chip">{Ic.truck} ~25 min</span>
         </div>
       </div>
 
@@ -941,7 +962,9 @@ function RestaurantInfoStrip({ restaurant }) {
         const popupText = [
           `<strong>${restaurant?.name || ""}${restaurant?.branch_name ? " · " + restaurant.branch_name : ""}</strong>`,
           restaurant?.address || "",
-        ].filter(Boolean).join("<br/>");
+        ]
+          .filter(Boolean)
+          .join("<br/>");
         if (popupText) marker.bindPopup(popupText).openPopup();
 
         leafletMapRef.current = map;
@@ -979,8 +1002,14 @@ function RestaurantInfoStrip({ restaurant }) {
           {/* Address */}
           {restaurant?.address && (
             <span className="rest-info-chip">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ color: "var(--orange)", flexShrink: 0 }}>
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                style={{ color: "var(--orange)", flexShrink: 0 }}
+              >
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
               </svg>
               {restaurant.address}
             </span>
@@ -989,8 +1018,18 @@ function RestaurantInfoStrip({ restaurant }) {
           {/* Phone */}
           {restaurant?.ph_no && (
             <span className="rest-info-chip">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--orange)", flexShrink: 0 }}>
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.18 6.18l1.08-.93a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ color: "var(--orange)", flexShrink: 0 }}
+              >
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.18 6.18l1.08-.93a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
               <a href={`tel:${restaurant.ph_no}`}>{restaurant.ph_no}</a>
             </span>
@@ -1003,11 +1042,26 @@ function RestaurantInfoStrip({ restaurant }) {
               onClick={() => setMapOpen((o) => !o)}
               aria-expanded={mapOpen}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                {mapOpen
-                  ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
-                  : <><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/></>
-                }
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                {mapOpen ? (
+                  <>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </>
+                ) : (
+                  <>
+                    <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6" />
+                  </>
+                )}
               </svg>
               {mapOpen ? "Close map" : "View map"}
             </button>
@@ -1044,8 +1098,13 @@ function RestaurantInfoStrip({ restaurant }) {
                   cursor: "pointer",
                 }}
               >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
                 </svg>
                 Get directions ↗
               </a>
@@ -2689,11 +2748,71 @@ function CheckoutSheet({
 }
 
 /* ── TrackSheet ───────────────────────────────────────────────────────────── */
-function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
+function TrackSheet({
+  order,
+  restaurant,
+  address,
+  onClose,
+  onStatusUpdate,
+  onCancelOrder,
+}) {
   const [liveStatus, setLiveStatus] = useState(order?.status || "pending");
   const [riderName, setRiderName] = useState(
     order?.delivery_rider_name || null,
   );
+
+  // Cancel state
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState("");
+
+  const canCancel = liveStatus === "pending";
+  const isAlreadyAccepted =
+    liveStatus === "accepted" ||
+    liveStatus === "preparing" ||
+    liveStatus === "on_the_way" ||
+    liveStatus === "delivered" ||
+    liveStatus === "rejected";
+
+  const handleCancel = async () => {
+    if (!order?.id) return;
+    setCancelling(true);
+    setCancelErr("");
+    try {
+      const { error: updateErr } = await supabase
+        .from("Orders")
+        .update({ status: "cancelled" })
+        .eq("id", order.id)
+        .eq("status", "pending"); // safety guard: only cancel if still pending
+      if (updateErr) throw updateErr;
+
+      // Re-fetch to check for a race (restaurant accepted at the same moment)
+      const { data: fresh, error: fetchErr } = await supabase
+        .from("Orders")
+        .select("status")
+        .eq("id", order.id)
+        .single();
+      if (fetchErr) throw fetchErr;
+
+      if (fresh?.status !== "cancelled") {
+        setCancelErr(
+          "Your order was already accepted by the restaurant and can no longer be cancelled.",
+        );
+        setLiveStatus(fresh.status);
+        if (onStatusUpdate) onStatusUpdate(fresh.status);
+      } else {
+        setLiveStatus("cancelled");
+        setShowCancelConfirm(false);
+        if (onStatusUpdate) onStatusUpdate("cancelled");
+        if (onCancelOrder) onCancelOrder(order.id);
+      }
+    } catch (e) {
+      console.error("[TrackSheet] cancel error:", e);
+      setCancelErr("Failed to cancel order. Please try again.");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const steps = [
     { l: "Order placed!", e: "✅" },
@@ -2932,8 +3051,8 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
               </div>
             )}
 
-          {/* WhatsApp */}
-          {restaurant?.ph_no && (
+          {/* WhatsApp — hidden once cancelled (nothing to follow up on) */}
+          {restaurant?.ph_no && liveStatus !== "cancelled" && (
             <a
               href={`https://wa.me/${restaurant.ph_no.replace(/\D/g, "")}?text=Hi! My order ID is %23${order?.id}`}
               target="_blank"
@@ -2956,7 +3075,149 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
             </a>
           )}
 
-          {/* Info */}
+          {/* ── Cancel order UI ─────────────────────────────────────────── */}
+
+          {/* Error banner */}
+          {cancelErr && (
+            <div
+              style={{
+                background: "var(--red-l)",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "var(--red)",
+                fontWeight: 500,
+                marginBottom: 12,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>⚠️</span>
+              <span>{cancelErr}</span>
+            </div>
+          )}
+
+          {/* Inline confirm prompt */}
+          {canCancel && showCancelConfirm && (
+            <div
+              style={{
+                background: "#fff8f6",
+                border: "1.5px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "14px 16px",
+                marginBottom: 12,
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--t1)",
+                  marginBottom: 12,
+                }}
+              >
+                Are you sure you want to cancel this order?
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    setShowCancelConfirm(false);
+                    setCancelErr("");
+                  }}
+                  disabled={cancelling}
+                  style={{
+                    flex: 1,
+                    padding: "10px 0",
+                    borderRadius: "var(--r-sm)",
+                    border: "1.5px solid var(--border)",
+                    background: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "var(--t2)",
+                    cursor: cancelling ? "not-allowed" : "pointer",
+                    opacity: cancelling ? 0.6 : 1,
+                  }}
+                >
+                  Keep order
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  style={{
+                    flex: 1,
+                    padding: "10px 0",
+                    borderRadius: "var(--r-sm)",
+                    border: "none",
+                    background: "var(--red)",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#fff",
+                    cursor: cancelling ? "not-allowed" : "pointer",
+                    opacity: cancelling ? 0.7 : 1,
+                  }}
+                >
+                  {cancelling ? "Cancelling…" : "Yes, cancel"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Cancel button — only when still pending and confirm not yet shown */}
+          {canCancel && !showCancelConfirm && (
+            <button
+              onClick={() => {
+                setCancelErr("");
+                setShowCancelConfirm(true);
+              }}
+              style={{
+                width: "100%",
+                padding: "12px 0",
+                borderRadius: "var(--r-sm)",
+                border: "1.5px solid #fca5a5",
+                background: "#fff",
+                fontSize: 13,
+                fontWeight: 700,
+                color: "var(--red)",
+                cursor: "pointer",
+                marginBottom: 12,
+                transition: "background .15s",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--red-l)")
+              }
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+            >
+              ✕ Cancel order
+            </button>
+          )}
+
+          {/* Info notice — cancellation not possible once accepted/beyond */}
+          {isAlreadyAccepted && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                borderRadius: "var(--r-sm)",
+                padding: "10px 14px",
+                fontSize: 12,
+                color: "#1d4ed8",
+                fontWeight: 500,
+                marginBottom: 12,
+              }}
+            >
+              <span>ℹ️</span>
+              <span>
+                Order accepted by restaurant — cancellation not available
+              </span>
+            </div>
+          )}
+
+          {/* Info card */}
           <div
             style={{
               background: "#fafafa",
@@ -3015,6 +3276,7 @@ function ProfileSheet({
   onSetDefault,
   defaultAddrId,
   onLoadOrders,
+  onLogout,
 }) {
   const [tab, setTab] = useState("info");
   const [form, setForm] = useState({
@@ -3023,6 +3285,7 @@ function ProfileSheet({
   });
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [selOrder, setSelOrder] = useState(null); // order detail sheet
 
   // Address editing state
@@ -3303,6 +3566,120 @@ function ProfileSheet({
               >
                 {saving ? <Spinner size={20} /> : "Save profile"}
               </button>
+              {/* ── Logout ── */}
+              <div
+                style={{
+                  marginTop: 8,
+                  paddingTop: 20,
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {!logoutConfirm ? (
+                  <button
+                    onClick={() => setLogoutConfirm(true)}
+                    style={{
+                      width: "100%",
+                      padding: "11px 0",
+                      borderRadius: "var(--r-sm)",
+                      background: "none",
+                      border: "1.5px solid var(--border)",
+                      color: "var(--t2)",
+                      fontWeight: 600,
+                      fontSize: 14,
+                      cursor: "pointer",
+                      fontFamily: "var(--font)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      transition: "border-color .15s, color .15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "var(--red)";
+                      e.currentTarget.style.color = "var(--red)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "var(--border)";
+                      e.currentTarget.style.color = "var(--t2)";
+                    }}
+                  >
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    Sign out
+                  </button>
+                ) : (
+                  <div
+                    style={{
+                      background: "var(--red-l)",
+                      border: "1px solid #fca5a5",
+                      borderRadius: "var(--r-sm)",
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 14,
+                        color: "var(--red)",
+                        marginBottom: 5,
+                      }}
+                    >
+                      Sign out?
+                    </p>
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "var(--t2)",
+                        marginBottom: 14,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      You'll need to enter your number again to place orders.
+                    </p>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        className="btn-out"
+                        style={{ flex: 1 }}
+                        onClick={() => setLogoutConfirm(false)}
+                      >
+                        Stay
+                      </button>
+                      <button
+                        style={{
+                          flex: 1,
+                          padding: "11px 0",
+                          borderRadius: "var(--r-sm)",
+                          background: "var(--red)",
+                          color: "#fff",
+                          fontWeight: 700,
+                          fontSize: 14,
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: "var(--font)",
+                        }}
+                        onClick={() => {
+                          setLogoutConfirm(false);
+                          if (onLogout) onLogout();
+                        }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -4002,7 +4379,14 @@ function DesktopCart({
         >
           {restaurant?.name}
         </p>
-        <h3 style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-display)", letterSpacing: "-.02em" }}>
+        <h3
+          style={{
+            fontSize: 18,
+            fontWeight: 800,
+            fontFamily: "var(--font-display)",
+            letterSpacing: "-.02em",
+          }}
+        >
           Your order {totalItems > 0 ? `(${totalItems})` : ""}
         </h3>
       </div>
@@ -4481,7 +4865,11 @@ export default function Customer() {
         }
 
         const [rR, cR, mR, atR] = await Promise.all([
-          supabase.from("Restaurants").select("*").eq("id", resolvedId).single(),
+          supabase
+            .from("Restaurants")
+            .select("*")
+            .eq("id", resolvedId)
+            .single(),
           supabase
             .from("Categories")
             .select("*")
@@ -4946,6 +5334,35 @@ export default function Customer() {
     showToast("Default address updated");
   };
 
+  /* ── Logout: clear localStorage, reset all customer state ── */
+  const handleLogout = () => {
+    try {
+      // Remove the restaurant-specific customer key
+      localStorage.removeItem(custKey(restId));
+      // Also clean up the default address preference for this customer
+      if (customer?.id) {
+        localStorage.removeItem(`frt_def_addr_${customer.id}`);
+      }
+    } catch (e) {
+      // localStorage may be unavailable in private browsing — proceed anyway
+      console.warn("[logout] localStorage error:", e);
+    }
+    // Reset all customer + UI state so PhoneOnboarding is shown
+    setCustomer(null);
+    setAddresses([]);
+    setDefaultAddrId(null);
+    setOrderHistory([]);
+    setCart([]);
+    setAddonCart([]);
+    setCartNote("");
+    setAppliedDiscount(null);
+    setLastOrder(null);
+    setShowCart(false);
+    setShowProfile(false);
+    setShowCheckout(false);
+    setShowTrack(false);
+  };
+
   if (loading || !custReady) return <LoadScreen />;
   if (error) return <ErrScreen msg={error} />;
 
@@ -5056,8 +5473,14 @@ export default function Customer() {
               color: "var(--t2)",
               transition: "all .18s",
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--card)"; e.currentTarget.style.borderColor = "var(--border-strong)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--card)";
+              e.currentTarget.style.borderColor = "var(--border-strong)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "var(--bg)";
+              e.currentTarget.style.borderColor = "var(--border)";
+            }}
           >
             {Ic.user}
           </button>
@@ -5409,7 +5832,16 @@ export default function Customer() {
                     justifyContent: "space-between",
                   }}
                 >
-                  <h2 style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-display)", letterSpacing: "-.02em" }}>{catLabel}</h2>
+                  <h2
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 800,
+                      fontFamily: "var(--font-display)",
+                      letterSpacing: "-.02em",
+                    }}
+                  >
+                    {catLabel}
+                  </h2>
                   <span
                     style={{
                       fontSize: 12,
@@ -5572,6 +6004,18 @@ export default function Customer() {
               prev ? { ...prev, status: newStatus } : prev,
             );
           }}
+          onCancelOrder={(orderId) => {
+            // Sync lastOrder so the status badge updates immediately
+            setLastOrder((prev) =>
+              prev ? { ...prev, status: "cancelled" } : prev,
+            );
+            // Sync orderHistory so ProfileSheet reflects the change without a reload
+            setOrderHistory((prev) =>
+              prev.map((o) =>
+                o.id === orderId ? { ...o, status: "cancelled" } : o,
+              ),
+            );
+          }}
         />
       )}
       {showProfile && (
@@ -5587,6 +6031,7 @@ export default function Customer() {
           onSetDefault={setDefaultAddress}
           defaultAddrId={defaultAddrId}
           onLoadOrders={() => loadOrderHistory(customer?.id)}
+          onLogout={handleLogout}
         />
       )}
     </>
@@ -5713,7 +6158,13 @@ function OrderDetailSheet({ order, onClose }) {
   // Only cancellable if order is still pending (restaurant hasn't accepted yet)
   const canCancel = liveOrder.status === "pending";
   const isCancelled = liveOrder.status === "cancelled";
-  const isAlreadyClosedForCancel = ["accepted", "preparing", "on_the_way", "delivered", "rejected"].includes(liveOrder.status);
+  const isAlreadyClosedForCancel = [
+    "accepted",
+    "preparing",
+    "on_the_way",
+    "delivered",
+    "rejected",
+  ].includes(liveOrder.status);
 
   const [cancelling, setCancelling] = useState(false);
   const [cancelErr, setCancelErr] = useState("");
@@ -5736,7 +6187,9 @@ function OrderDetailSheet({ order, onClose }) {
         .eq("id", liveOrder.id)
         .single();
       if (fresh?.status !== "cancelled") {
-        setCancelErr("Your order was already accepted by the restaurant and can no longer be cancelled.");
+        setCancelErr(
+          "Your order was already accepted by the restaurant and can no longer be cancelled.",
+        );
       } else {
         setLiveOrder((prev) => ({ ...prev, status: "cancelled" }));
       }
@@ -6146,10 +6599,24 @@ function OrderDetailSheet({ order, onClose }) {
                 padding: "12px 14px",
               }}
             >
-              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--red)", marginBottom: 8 }}>
+              <p
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--red)",
+                  marginBottom: 8,
+                }}
+              >
                 Cancel this order?
               </p>
-              <p style={{ fontSize: 12, color: "var(--t2)", marginBottom: 12, lineHeight: 1.5 }}>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--t2)",
+                  marginBottom: 12,
+                  lineHeight: 1.5,
+                }}
+              >
                 This cannot be undone. The restaurant will be notified.
               </p>
               <div style={{ display: "flex", gap: 8 }}>
@@ -6201,7 +6668,10 @@ function OrderDetailSheet({ order, onClose }) {
                   fontFamily: "var(--font)",
                   transition: "opacity .15s",
                 }}
-                onClick={() => { setCancelErr(""); setShowCancelConfirm(true); }}
+                onClick={() => {
+                  setCancelErr("");
+                  setShowCancelConfirm(true);
+                }}
               >
                 ✕ Cancel order
               </button>
