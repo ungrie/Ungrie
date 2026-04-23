@@ -4,8 +4,20 @@ import "./index.css";
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 const fmt = (n) => `KD ${Number(n || 0).toFixed(3)}`;
-const getRestId = () =>
-  new URLSearchParams(window.location.search).get("rest_id");
+
+/**
+ * Reads the URL for either:
+ *   ?r=<slug>          ← preferred (new style)
+ *   ?rest_id=<id>      ← legacy numeric fallback
+ * Returns { slug, legacyId } — one will be set, the other null.
+ */
+const getRestParam = () => {
+  const p = new URLSearchParams(window.location.search);
+  const slug = p.get("r") || null;
+  const legacyId = p.get("rest_id") || null;
+  return { slug, legacyId };
+};
+
 // Key is per-restaurant so returning users of restaurant A don't auto-login at restaurant B
 const custKey = (restId) => `frt_cust_${restId}`;
 
@@ -4077,9 +4089,12 @@ function DesktopCart({
 
 /* ── MAIN COMPONENT ───────────────────────────────────────────────────────── */
 export default function Customer() {
-  const restId = getRestId();
+  // Resolve slug → numeric restId before anything else
+  const { slug, legacyId } = getRestParam();
 
   /* data state */
+  const [restId, setRestId] = useState(legacyId ? Number(legacyId) : null);
+  const [slugError, setSlugError] = useState(null); // set if slug lookup fails
   const [restaurant, setRestaurant] = useState(null);
   const [categories, setCategories] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
@@ -4167,33 +4182,54 @@ export default function Customer() {
     }
   }, []);
 
-  /* load restaurant + menu */
+  /* resolve slug → restId, then load restaurant + menu */
   useEffect(() => {
-    if (!restId) {
-      setError("No restaurant ID in URL. Use ?rest_id=<id>");
+    // Neither a slug nor a legacy ID was provided
+    if (!slug && !legacyId) {
+      setError("No restaurant found. Please use a valid link.");
       setLoading(false);
       return;
     }
     (async () => {
       try {
+        let resolvedId = restId; // already set if legacyId was in URL
+
+        // If a slug was provided, look up the restaurant by slug first
+        if (slug) {
+          const { data: slugRow, error: slugErr } = await supabase
+            .from("Restaurants")
+            .select("id")
+            .eq("slug", slug)
+            .maybeSingle();
+          if (slugErr) throw new Error("Failed to resolve restaurant link.");
+          if (!slugRow) {
+            setSlugError(`No restaurant found for "${slug}".`);
+            setError(`No restaurant found for "${slug}".`);
+            setLoading(false);
+            return;
+          }
+          resolvedId = slugRow.id;
+          setRestId(resolvedId);
+        }
+
         const [rR, cR, mR, atR] = await Promise.all([
-          supabase.from("Restaurants").select("*").eq("id", restId).single(),
+          supabase.from("Restaurants").select("*").eq("id", resolvedId).single(),
           supabase
             .from("Categories")
             .select("*")
-            .eq("rest_id", restId)
+            .eq("rest_id", resolvedId)
             .eq("visible", true)
             .order("sort_order"),
           supabase
             .from("Menu")
             .select("*")
-            .eq("rest_id", restId)
+            .eq("rest_id", resolvedId)
             .eq("visible", true)
             .order("sort_order"),
           supabase
             .from("Add_Ons_Type")
             .select("id, name, min_qty")
-            .eq("rest_id", restId)
+            .eq("rest_id", resolvedId)
             .order("id"),
         ]);
         if (rR.error || !rR.data) throw new Error("Restaurant not found");
@@ -4217,7 +4253,7 @@ export default function Customer() {
         setLoading(false);
       }
     })();
-  }, [restId]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — slug/legacyId are URL constants
 
   /* load returning customer (per-restaurant key) */
   useEffect(() => {

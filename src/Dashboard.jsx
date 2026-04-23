@@ -401,7 +401,7 @@ function printZReport({
   </table>
   <h2>Top Customers</h2>
   <table><thead><tr><th>Customer</th><th>Orders</th><th>Spent</th></tr></thead><tbody>${custRows || "<tr><td colspan='3' style='padding:12px;color:#aaa;text-align:center'>No data</td></tr>"}</tbody></table>
-  <div class="footer">FeastRush &nbsp;·&nbsp; ${restaurant?.name || ""} &nbsp;·&nbsp; Z-Report</div>
+  <div class="footer">Ungrie &nbsp;·&nbsp; ${restaurant?.name || ""} &nbsp;·&nbsp; Z-Report</div>
   <script>window.onload=()=>window.print()</script></body></html>`;
 
   const w = window.open("", "_blank");
