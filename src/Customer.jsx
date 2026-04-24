@@ -2489,10 +2489,15 @@ function CheckoutSheet({
   appliedDiscount,
   discountAmt,
   subTotal,
+  acceptDelivery,
+  acceptPickup,
+  orderType,
+  onOrderTypeChange,
 }) {
   const [selAddr, setSelAddr] = useState(defaultAddr?.id || null);
   const [pay, setPay] = useState("Cash");
   const [placing, setPlacing] = useState(false);
+  const [typeErr, setTypeErr] = useState("");
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -2501,7 +2506,18 @@ function CheckoutSheet({
     };
   }, []);
 
+  // If the current type becomes unavailable (restaurant toggled it off while sheet is open), auto-switch
+  useEffect(() => {
+    if (orderType === "delivery" && !acceptDelivery && acceptPickup) {
+      onOrderTypeChange("pickup");
+    } else if (orderType === "pickup" && !acceptPickup && acceptDelivery) {
+      onOrderTypeChange("delivery");
+    }
+  }, [acceptDelivery, acceptPickup, orderType, onOrderTypeChange]);
+
   const addr = addresses.find((a) => a.id === selAddr);
+  const isPickup = orderType === "pickup";
+  const bothOff = !acceptDelivery && !acceptPickup;
 
   return (
     <>
@@ -2515,104 +2531,197 @@ function CheckoutSheet({
           </button>
         </div>
         <div style={{ padding: "0 20px 20px" }}>
-          {/* Address */}
-          <div style={{ marginBottom: 22 }}>
-            <label className="lbl">Delivery address</label>
-            {addresses.length === 0 ? (
-              <button
-                className="btn-out"
-                style={{ width: "100%", justifyContent: "center" }}
-                onClick={onAddAddress}
+          {/* Both off — hard block */}
+          {bothOff && (
+            <div
+              style={{
+                background: "#fff8f0",
+                border: "1.5px solid #fed7aa",
+                borderRadius: var_r_sm,
+                padding: "18px 16px",
+                marginBottom: 20,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 36, marginBottom: 8 }}>🔕</div>
+              <p
+                style={{
+                  fontWeight: 800,
+                  fontSize: 15,
+                  color: "#92400e",
+                  marginBottom: 4,
+                }}
               >
-                {Ic.plus} Add address
-              </button>
-            ) : (
-              <>
-                {addresses.map((a) => (
+                Not accepting orders right now
+              </p>
+              <p style={{ fontSize: 13, color: "#b45309" }}>
+                The restaurant has temporarily paused all orders. Please check
+                back soon!
+              </p>
+            </div>
+          )}
+
+          {/* Order type selector — only when both are available or when one is on */}
+          {!bothOff && (acceptDelivery || acceptPickup) && (
+            <div style={{ marginBottom: 22 }}>
+              <label className="lbl">Order type</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                {acceptDelivery && (
                   <div
-                    key={a.id}
-                    className={`addr-card${selAddr === a.id ? " sel" : ""}`}
-                    onClick={() => setSelAddr(a.id)}
+                    className={`pay-opt${!isPickup ? " sel" : ""}`}
+                    onClick={() => {
+                      onOrderTypeChange("delivery");
+                      setTypeErr("");
+                    }}
+                    style={{ flex: 1 }}
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 4,
-                      }}
-                    >
-                      <span style={{ color: "var(--t2)" }}>
-                        {a.label === "Work" ? Ic.work : Ic.homeaddr}
-                      </span>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>
-                        {a.label}
-                      </span>
-                      {selAddr === a.id && (
-                        <span
-                          style={{ marginLeft: "auto", color: "var(--orange)" }}
-                        >
-                          {Ic.check}
-                        </span>
-                      )}
-                    </div>
-                    <p
-                      style={{
-                        fontSize: 13,
-                        color: "var(--t2)",
-                        paddingLeft: 22,
-                      }}
-                    >
-                      {[
-                        a.apartment_no && `Apt ${a.apartment_no}`,
-                        a.floor && `Floor ${a.floor}`,
-                        a.bldg_name,
-                        a.street,
-                        a.block,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
-                    </p>
+                    <span style={{ fontSize: 24 }}>🛵</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                      Delivery
+                    </span>
                   </div>
-                ))}
+                )}
+                {acceptPickup && (
+                  <div
+                    className={`pay-opt${isPickup ? " sel" : ""}`}
+                    onClick={() => {
+                      onOrderTypeChange("pickup");
+                      setTypeErr("");
+                    }}
+                    style={{ flex: 1 }}
+                  >
+                    <span style={{ fontSize: 24 }}>🏃</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                      Pickup
+                    </span>
+                  </div>
+                )}
+              </div>
+              {/* Pickup info notice */}
+              {isPickup && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: "#f0fdfa",
+                    border: "1px solid #99f6e4",
+                    borderRadius: var_r_sm,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    color: "#0f766e",
+                    fontWeight: 500,
+                  }}
+                >
+                  🏃 You'll collect this order in person from the restaurant.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Address — delivery only */}
+          {!bothOff && !isPickup && (
+            <div style={{ marginBottom: 22 }}>
+              <label className="lbl">Delivery address</label>
+              {addresses.length === 0 ? (
                 <button
                   className="btn-out"
-                  style={{
-                    justifyContent: "center",
-                    width: "100%",
-                    marginTop: 4,
-                  }}
+                  style={{ width: "100%", justifyContent: "center" }}
                   onClick={onAddAddress}
                 >
-                  {Ic.plus} Add new address
+                  {Ic.plus} Add address
                 </button>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  {addresses.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`addr-card${selAddr === a.id ? " sel" : ""}`}
+                      onClick={() => setSelAddr(a.id)}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span style={{ color: "var(--t2)" }}>
+                          {a.label === "Work" ? Ic.work : Ic.homeaddr}
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>
+                          {a.label}
+                        </span>
+                        {selAddr === a.id && (
+                          <span
+                            style={{
+                              marginLeft: "auto",
+                              color: "var(--orange)",
+                            }}
+                          >
+                            {Ic.check}
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "var(--t2)",
+                          paddingLeft: 22,
+                        }}
+                      >
+                        {[
+                          a.apartment_no && `Apt ${a.apartment_no}`,
+                          a.floor && `Floor ${a.floor}`,
+                          a.bldg_name,
+                          a.street,
+                          a.block,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                    </div>
+                  ))}
+                  <button
+                    className="btn-out"
+                    style={{
+                      justifyContent: "center",
+                      width: "100%",
+                      marginTop: 4,
+                    }}
+                    onClick={onAddAddress}
+                  >
+                    {Ic.plus} Add new address
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Payment */}
-          <div style={{ marginBottom: 22 }}>
-            <label className="lbl">Payment method</label>
-            <div style={{ display: "flex", gap: 10 }}>
-              {[
-                ["Cash", "💵"],
-                ["Card", "💳"],
-                ["Online", "📱"],
-              ].map(([m, em]) => (
-                <div
-                  key={m}
-                  className={`pay-opt${pay === m ? " sel" : ""}`}
-                  onClick={() => setPay(m)}
-                >
-                  <span style={{ fontSize: 24 }}>{em}</span>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{m}</span>
-                </div>
-              ))}
+          {!bothOff && (
+            <div style={{ marginBottom: 22 }}>
+              <label className="lbl">Payment method</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                {[
+                  ["Cash", "💵"],
+                  ["Card", "💳"],
+                  ["Online", "📱"],
+                ].map(([m, em]) => (
+                  <div
+                    key={m}
+                    className={`pay-opt${pay === m ? " sel" : ""}`}
+                    onClick={() => setPay(m)}
+                  >
+                    <span style={{ fontSize: 24 }}>{em}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{m}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Notes */}
-          {cartNote ? (
+          {!bothOff && cartNote ? (
             <div style={{ marginBottom: 22 }}>
               <label className="lbl">Special instructions</label>
               <div
@@ -2632,7 +2741,7 @@ function CheckoutSheet({
           ) : null}
 
           {/* Applied discount badge */}
-          {appliedDiscount && discountAmt > 0 && (
+          {!bothOff && appliedDiscount && discountAmt > 0 && (
             <div
               style={{
                 background: "#f0fdf4",
@@ -2667,80 +2776,116 @@ function CheckoutSheet({
           )}
 
           {/* Total summary */}
-          <div
-            style={{
-              background: "#fafafa",
-              borderRadius: var_r_sm,
-              padding: "13px 16px",
-              marginBottom: 16,
-            }}
-          >
-            {subTotal != null && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 13,
-                  color: "var(--t2)",
-                  marginBottom: 6,
-                }}
-              >
-                <span>Subtotal</span>
-                <span>{fmt(subTotal)}</span>
-              </div>
-            )}
-            {appliedDiscount && discountAmt > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 13,
-                  color: "#15803d",
-                  fontWeight: 700,
-                  marginBottom: 6,
-                }}
-              >
-                <span>🏷 Discount</span>
-                <span>−{fmt(discountAmt)}</span>
-              </div>
-            )}
+          {!bothOff && (
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                borderTop:
-                  subTotal != null ? "1px solid var(--border)" : "none",
-                paddingTop: subTotal != null ? 10 : 0,
-                marginTop: subTotal != null ? 6 : 0,
+                background: "#fafafa",
+                borderRadius: var_r_sm,
+                padding: "13px 16px",
+                marginBottom: 16,
               }}
             >
-              <span style={{ fontWeight: 600 }}>Total to pay</span>
-              <span style={{ fontSize: 18, fontWeight: 800 }}>
-                {fmt(total)}
-              </span>
+              {subTotal != null && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    color: "var(--t2)",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>Subtotal</span>
+                  <span>{fmt(subTotal)}</span>
+                </div>
+              )}
+              {/* Delivery fee row — delivery only */}
+              {!isPickup && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    color: "var(--t2)",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>Delivery fee</span>
+                  <span>{fmt(0.5)}</span>
+                </div>
+              )}
+              {appliedDiscount && discountAmt > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    color: "#15803d",
+                    fontWeight: 700,
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>🏷 Discount</span>
+                  <span>−{fmt(discountAmt)}</span>
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderTop:
+                    subTotal != null ? "1px solid var(--border)" : "none",
+                  paddingTop: subTotal != null ? 10 : 0,
+                  marginTop: subTotal != null ? 6 : 0,
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>Total to pay</span>
+                <span style={{ fontSize: 18, fontWeight: 800 }}>
+                  {fmt(total)}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
-          <button
-            className="btn-primary"
-            disabled={placing || !selAddr}
-            onClick={async () => {
-              if (!addr) {
-                alert("Please select a delivery address.");
-                return;
-              }
-              setPlacing(true);
-              await onPlaceOrder({
-                address: addr,
-                payMethod: pay,
-                notes: cartNote || "",
-              });
-              setPlacing(false);
-            }}
-          >
-            {placing ? <Spinner size={20} /> : `Place order · ${fmt(total)}`}
-          </button>
+          {/* Error */}
+          {typeErr && (
+            <p
+              style={{
+                color: "var(--red)",
+                fontSize: 13,
+                marginBottom: 10,
+                fontWeight: 600,
+              }}
+            >
+              ⚠️ {typeErr}
+            </p>
+          )}
+
+          {/* Place order button */}
+          {!bothOff && (
+            <button
+              className="btn-primary"
+              disabled={placing || (!isPickup && !selAddr)}
+              onClick={async () => {
+                if (!isPickup && !addr) {
+                  setTypeErr("Please select a delivery address.");
+                  return;
+                }
+                setTypeErr("");
+                setPlacing(true);
+                await onPlaceOrder({
+                  address: isPickup ? null : addr,
+                  payMethod: pay,
+                  notes: cartNote || "",
+                  orderType,
+                });
+                setPlacing(false);
+              }}
+            >
+              {placing ? <Spinner size={20} /> : `Place order · ${fmt(total)}`}
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -3228,6 +3373,23 @@ function TrackSheet({
               gap: 10,
             }}
           >
+            {/* Order type pill */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: "3px 10px",
+                  borderRadius: 99,
+                  background:
+                    order?.order_type === "pickup" ? "#ccfbf1" : "#eff6ff",
+                  color: order?.order_type === "pickup" ? "#0f766e" : "#2563eb",
+                  letterSpacing: ".04em",
+                }}
+              >
+                {order?.order_type === "pickup" ? "🏃 Pickup" : "🛵 Delivery"}
+              </span>
+            </div>
             <div style={{ display: "flex", gap: 10 }}>
               <span style={{ fontSize: 16 }}>🏪</span>
               <div>
@@ -3242,7 +3404,8 @@ function TrackSheet({
                 )}
               </div>
             </div>
-            {address && (
+            {/* Delivery address — only shown for delivery orders */}
+            {order?.order_type !== "pickup" && address && (
               <div style={{ display: "flex", gap: 10 }}>
                 <span style={{ fontSize: 16 }}>📍</span>
                 <p style={{ fontSize: 12, color: "var(--t2)" }}>
@@ -3253,6 +3416,17 @@ function TrackSheet({
                   ]
                     .filter(Boolean)
                     .join(", ")}
+                </p>
+              </div>
+            )}
+            {/* Pickup reminder */}
+            {order?.order_type === "pickup" && (
+              <div
+                style={{ display: "flex", gap: 10, alignItems: "flex-start" }}
+              >
+                <span style={{ fontSize: 16 }}>📌</span>
+                <p style={{ fontSize: 12, color: "#0f766e", fontWeight: 600 }}>
+                  Head to the restaurant to collect your order when it's ready.
                 </p>
               </div>
             )}
@@ -4779,6 +4953,9 @@ export default function Customer() {
   const [cartNote, setCartNote] = useState("");
   const [lastOrder, setLastOrder] = useState(null);
 
+  /* order type — "delivery" | "pickup". Resolved at checkout open. */
+  const [orderType, setOrderType] = useState("delivery");
+
   /* discount */
   const [appliedDiscount, setAppliedDiscount] = useState(null); // the validated Discount row
   const [customizeItem, setCustomizeItem] = useState(null);
@@ -5004,6 +5181,38 @@ export default function Customer() {
     return () => supabase.removeChannel(ch);
   }, [customer?.id, restId]);
 
+  // Realtime: keep delivery/pickup flags in sync when restaurant toggles them
+  useEffect(() => {
+    if (!restId) return;
+    const ch = supabase
+      .channel(`rest-flags-${restId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Restaurants",
+          filter: `id=eq.${restId}`,
+        },
+        (payload) => {
+          if (!payload.new) return;
+          setRestaurant((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  accept_delivery:
+                    payload.new.accept_delivery ?? prev.accept_delivery,
+                  accept_pickup:
+                    payload.new.accept_pickup ?? prev.accept_pickup,
+                }
+              : prev,
+          );
+        },
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [restId]);
+
   /* filtered menu */
   const filtered = menuItems.filter((m) => {
     const q = search.toLowerCase();
@@ -5145,7 +5354,7 @@ export default function Customer() {
   };
 
   /* place order — writes Orders + Order_Items + Order_Item_Variants + Order_Item_AddOns */
-  const placeOrder = async ({ address, payMethod, notes }) => {
+  const placeOrder = async ({ address, payMethod, notes, orderType: ot }) => {
     if (!customer || !restaurant) return;
     const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
     try {
@@ -5160,6 +5369,7 @@ export default function Customer() {
           payment_status: "pending",
           payment_method: payMethod,
           notes: notes || "",
+          order_type: ot || "delivery",
         })
         .select()
         .single();
@@ -5240,7 +5450,11 @@ export default function Customer() {
         })
         .eq("id", customer.id);
 
-      setLastOrder({ ...order, deliveryAddress: address });
+      setLastOrder({
+        ...order,
+        order_type: ot || "delivery",
+        deliveryAddress: ot === "pickup" ? null : address,
+      });
       setCart([]);
       setAddonCart([]);
       setCartNote("");
@@ -5363,6 +5577,20 @@ export default function Customer() {
     setShowTrack(false);
   };
 
+  // Derived availability flags (default true if columns don't exist yet)
+  const acceptDelivery = restaurant?.accept_delivery ?? true;
+  const acceptPickup = restaurant?.accept_pickup ?? true;
+  const bothOrdersOff = !acceptDelivery && !acceptPickup;
+
+  // Auto-correct orderType if the selected type was just disabled by the restaurant
+  // (effect runs whenever restaurant flags change)
+  useEffect(() => {
+    if (!acceptDelivery && acceptPickup && orderType === "delivery") {
+      setOrderType("pickup");
+    } else if (!acceptPickup && acceptDelivery && orderType === "pickup") {
+      setOrderType("delivery");
+    }
+  }, [acceptDelivery, acceptPickup]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading || !custReady) return <LoadScreen />;
   if (error) return <ErrScreen msg={error} />;
 
@@ -5380,6 +5608,7 @@ export default function Customer() {
   }
 
   const defaultAddr = addresses.find((a) => a.id === defaultAddrId);
+
   const catLabel =
     activeCat === "all"
       ? "All dishes"
@@ -5527,6 +5756,38 @@ export default function Customer() {
 
           {/* RESTAURANT INFO STRIP */}
           <RestaurantInfoStrip restaurant={restaurant} />
+
+          {/* NOT ACCEPTING ORDERS BANNER */}
+          {restaurant &&
+            !(restaurant.accept_delivery ?? true) &&
+            !(restaurant.accept_pickup ?? true) && (
+              <div
+                style={{
+                  margin: "14px 16px 0",
+                  background: "#fff8f0",
+                  border: "1.5px solid #fed7aa",
+                  borderRadius: "var(--r-sm)",
+                  padding: "18px 16px",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ fontSize: 40, marginBottom: 8 }}>🔕</div>
+                <p
+                  style={{
+                    fontWeight: 800,
+                    fontSize: 16,
+                    color: "#92400e",
+                    marginBottom: 4,
+                  }}
+                >
+                  Not accepting orders right now
+                </p>
+                <p style={{ fontSize: 13, color: "#b45309", lineHeight: 1.5 }}>
+                  We've temporarily paused all orders. Browse our menu and come
+                  back soon!
+                </p>
+              </div>
+            )}
 
           {/* SEARCH */}
           <div style={{ padding: "16px 16px 0", background: "var(--card)" }}>
@@ -5892,6 +6153,10 @@ export default function Customer() {
             customer={customer}
             restId={restId}
             onCheckout={(t) => {
+              if (bothOrdersOff) {
+                showToast("We're not accepting orders right now.");
+                return;
+              }
               setCheckoutTotal(t);
               setShowCheckout(true);
             }}
@@ -5967,6 +6232,10 @@ export default function Customer() {
           customer={customer}
           restId={restId}
           onCheckout={(t, n) => {
+            if (bothOrdersOff) {
+              showToast("We're not accepting orders right now.");
+              return;
+            }
             setCheckoutTotal(t);
             setCartNote(n || "");
             setShowCart(false);
@@ -5991,6 +6260,10 @@ export default function Customer() {
             setShowCheckout(false);
             setShowProfile(true);
           }}
+          acceptDelivery={restaurant?.accept_delivery ?? true}
+          acceptPickup={restaurant?.accept_pickup ?? true}
+          orderType={orderType}
+          onOrderTypeChange={setOrderType}
         />
       )}
       {showTrack && lastOrder && (

@@ -8405,12 +8405,13 @@ const STATUS_META = {
 // ─── Invoice Generator (opens print dialog with styled HTML) ─────────────────
 function printInvoice(order, items, restaurant, discount, deliveryAddr) {
   // ── computed values ─────────────────────────────────────────────────────────
+  const isPickup = order.order_type === "pickup";
   const safeItems = items || [];
   const itemsSubtotal = safeItems.reduce(
     (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
     0,
   );
-  const deliveryFee = 0.5;
+  const deliveryFee = isPickup ? 0 : 0.5;
   const discountAmt = discount?.amount_saved ?? 0;
   const grandTotal = Number(
     order.total_amount ?? itemsSubtotal + deliveryFee - discountAmt,
@@ -8604,7 +8605,13 @@ function printInvoice(order, items, restaurant, discount, deliveryAddr) {
         <div class="cell-value" style="text-transform:capitalize">${order.payment_status || "Pending"}</div>
       </div>
       ${
-        order.delivery_rider_name
+        isPickup
+          ? `
+      <div class="meta-cell full" style="background:#f0fdfa;border-color:#99f6e4;">
+        <div class="cell-label" style="color:#0f766e">Order type</div>
+        <div class="cell-value" style="color:#0f766e">🏃 Pickup — Customer will collect in person</div>
+      </div>`
+          : order.delivery_rider_name
           ? `
       <div class="meta-cell">
         <div class="cell-label">Delivery rider</div>
@@ -8639,10 +8646,11 @@ function printInvoice(order, items, restaurant, discount, deliveryAddr) {
           <span class="tally-label">Items subtotal</span>
           <span class="tally-value">KD ${itemsSubtotal.toFixed(3)}</span>
         </div>
+        ${!isPickup ? `
         <div class="tally-row">
           <span class="tally-label">Delivery fee</span>
           <span class="tally-value">KD ${deliveryFee.toFixed(3)}</span>
-        </div>
+        </div>` : ""}
         ${discountRow}
       </div>
       <div class="tally-grand">
@@ -8651,7 +8659,7 @@ function printInvoice(order, items, restaurant, discount, deliveryAddr) {
       </div>
     </div>
     ${
-      addrLine
+      !isPickup && addrLine
         ? `
     <div class="section-heading"><span class="sh-text">📍 Delivery Address</span><div class="sh-line"></div></div>
     <div class="info-card">
@@ -8715,7 +8723,7 @@ function OrdersPage({ t, user }) {
         .from("Orders")
         .select(
           `id, status, total_amount, payment_method, payment_status, notes, created_at,
-                 delivery_rider_name, delivery_rider_phone,
+                 delivery_rider_name, delivery_rider_phone, order_type,
                  cust_id, Customer(id, cust_name, ph_num)`,
         )
         .eq("rest_id", restId)
@@ -8845,7 +8853,7 @@ function OrdersPage({ t, user }) {
             const { data } = await supabase
               .from("Orders")
               .select(
-                `id, status, total_amount, payment_method, payment_status, notes, created_at, delivery_rider_name, delivery_rider_phone, cust_id, Customer(id, cust_name, ph_num)`,
+                `id, status, total_amount, payment_method, payment_status, notes, created_at, delivery_rider_name, delivery_rider_phone, order_type, cust_id, Customer(id, cust_name, ph_num)`,
               )
               .eq("id", payload.new.id)
               .single();
@@ -8935,6 +8943,9 @@ function OrdersPage({ t, user }) {
   // ── Reject order ───────────────────────────────────────────────────────────
   // (handled inside RejectOrderModal)
 
+  // ── Generic status update (used for pickup "ready" transition) ─────────────
+  const handleStatusUpdate = (status) => updateStatus(selectedOrder.id, status);
+
   // ── Send for delivery ──────────────────────────────────────────────────────
   // (handled inside DeliveryAssignModal)
 
@@ -8946,31 +8957,57 @@ function OrdersPage({ t, user }) {
     const meta = STATUS_META[order.status] || STATUS_META.pending;
     const custName = order.Customer?.cust_name || "Customer";
     const isSelected = selectedOrder?.id === order.id;
+    const isPickup = order.order_type === "pickup";
+
+    // Teal palette — works in both light and dark (t.surface2 is the dark alt surface)
+    const pickupBg   = isSelected ? t.accentBg  : (isPickup ? "#f0fdfa" : t.surface);
+    const pickupBdr  = isSelected ? t.accentBorder : (isPickup ? "#5eead4" : t.border);
+
     return (
       <button
         onClick={() => selectOrder(order)}
         style={{
-          background: isSelected ? t.accentBg : t.surface,
-          border: `1px solid ${isSelected ? t.accentBorder : t.border}`,
+          background: pickupBg,
+          border: `1px solid ${pickupBdr}`,
           textAlign: "left",
           width: "100%",
         }}
         className="rounded-xl p-3.5 transition-all duration-150 hover:shadow-sm active:scale-[0.98]"
       >
         <div className="flex items-center justify-between mb-1.5">
-          <span
-            style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
-            className="text-xs"
-          >
-            #{order.id}
-          </span>
+          {/* ID + optional pickup badge */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
+              className="text-xs flex-shrink-0"
+            >
+              #{order.id}
+            </span>
+            {isPickup && (
+              <span
+                style={{
+                  background: "#ccfbf1",
+                  color: "#0f766e",
+                  fontFamily: "'Lato', sans-serif",
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 99,
+                  letterSpacing: ".05em",
+                  flexShrink: 0,
+                }}
+              >
+                🏃 PICKUP
+              </span>
+            )}
+          </div>
           <span
             style={{
               background: meta.bg,
               color: meta.color,
               fontFamily: "'Lato', sans-serif",
             }}
-            className="text-xs font-bold px-2 py-0.5 rounded-full"
+            className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0"
           >
             {meta.label}
           </span>
@@ -9017,12 +9054,43 @@ function OrdersPage({ t, user }) {
     const isOnWay = selectedOrder.status === "on_the_way";
     const isCancelled = selectedOrder.status === "cancelled";
     const isClosed = ["delivered", "rejected", "cancelled"].includes(selectedOrder.status);
+    const isPickupOrder = selectedOrder.order_type === "pickup";
 
     return (
       <div
-        style={{ background: t.surface, border: `1px solid ${t.border}` }}
+        style={{
+          background: t.surface,
+          border: `1px solid ${isPickupOrder ? "#5eead4" : t.border}`,
+        }}
         className="flex-1 flex flex-col rounded-xl overflow-hidden min-w-0"
       >
+        {/* Pickup banner */}
+        {isPickupOrder && (
+          <div
+            style={{
+              background: "#ccfbf1",
+              borderBottom: "1px solid #99f6e4",
+              padding: "7px 20px",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🏃</span>
+            <span
+              style={{
+                color: "#0f766e",
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+              }}
+            >
+              Pickup order — customer will collect in person
+            </span>
+          </div>
+        )}
         {/* Header */}
         <div
           style={{ borderBottom: `1px solid ${t.border}` }}
@@ -9161,6 +9229,29 @@ function OrdersPage({ t, user }) {
               </span>
             </div>
 
+            {/* Order type pill */}
+            <div className="flex justify-between items-center text-sm mb-2">
+              <span
+                style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
+              >
+                Order type
+              </span>
+              <span
+                style={{
+                  fontFamily: "'Lato', sans-serif",
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: "2px 10px",
+                  borderRadius: 99,
+                  background: isPickupOrder ? "#ccfbf1" : "#eff6ff",
+                  color: isPickupOrder ? "#0f766e" : "#2563eb",
+                  letterSpacing: ".04em",
+                }}
+              >
+                {isPickupOrder ? "🏃 Pickup" : "🛵 Delivery"}
+              </span>
+            </div>
+
             {/* Breakdown rows */}
             <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: 8 }}>
               {/* Items subtotal — computed from loaded items */}
@@ -9196,20 +9287,22 @@ function OrdersPage({ t, user }) {
                   );
                 })()}
 
-              {/* Delivery fee */}
-              <div className="flex justify-between text-sm mb-1.5">
-                <span
-                  style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
-                >
-                  Delivery fee
-                </span>
-                <span
-                  style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-                  className="font-medium"
-                >
-                  KD 0.500
-                </span>
-              </div>
+              {/* Delivery fee — only for delivery orders */}
+              {!isPickupOrder && (
+                <div className="flex justify-between text-sm mb-1.5">
+                  <span
+                    style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
+                  >
+                    Delivery fee
+                  </span>
+                  <span
+                    style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
+                    className="font-medium"
+                  >
+                    KD 0.500
+                  </span>
+                </div>
+              )}
 
               {/* Discount — only shown when a redemption exists */}
               {orderDiscount && orderDiscount.amount_saved > 0 && (
@@ -9426,8 +9519,8 @@ function OrdersPage({ t, user }) {
             </div>
           )}
 
-          {/* Delivery rider info */}
-          {selectedOrder.delivery_rider_name && (
+          {/* Delivery rider info — delivery orders only */}
+          {!isPickupOrder && selectedOrder.delivery_rider_name && (
             <div
               style={{
                 borderBottom: `1px solid ${t.border}`,
@@ -9458,8 +9551,8 @@ function OrdersPage({ t, user }) {
             </div>
           )}
 
-          {/* Delivery address — fetched separately for reliability */}
-          {(() => {
+          {/* Delivery address — delivery orders only */}
+          {!isPickupOrder && (() => {
             const addr = deliveryAddr;
             if (!addr) return null;
             const addrLine = [
@@ -9643,17 +9736,24 @@ function OrdersPage({ t, user }) {
               <button
                 onClick={() => {
                   setActionErr("");
-                  setShowDeliveryModal(true);
-                  fetchRiders();
+                  if (isPickupOrder) {
+                    // For pickup: skip rider assignment, go straight to on_the_way (= ready)
+                    handleStatusUpdate("on_the_way");
+                  } else {
+                    setShowDeliveryModal(true);
+                    fetchRiders();
+                  }
                 }}
+                disabled={actionLoading}
                 style={{
-                  background: t.green,
+                  background: isPickupOrder ? "#0d9488" : t.green,
                   color: "#fff",
                   fontFamily: "'Lato', sans-serif",
+                  opacity: actionLoading ? 0.7 : 1,
                 }}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold hover:opacity-90 active:scale-95 transition-all"
               >
-                🛵 Send for Delivery
+                {actionLoading ? "…" : isPickupOrder ? "✅ Mark Ready for Pickup" : "🛵 Send for Delivery"}
               </button>
             )}
             {isOnWay && (
@@ -9668,7 +9768,7 @@ function OrdersPage({ t, user }) {
                 }}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold hover:opacity-90 active:scale-95 transition-all"
               >
-                {actionLoading ? "…" : "✅ Mark Delivered"}
+                {actionLoading ? "…" : isPickupOrder ? "✅ Mark Collected" : "✅ Mark Delivered"}
               </button>
             )}
           </div>
@@ -13944,7 +14044,7 @@ function CancellationsPage({ t, user }) {
           .from("Orders")
           .select(
             `id, status, total_amount, payment_method, payment_status, notes, created_at,
-             cust_id, Customer(id, cust_name, ph_num)`
+             order_type, cust_id, Customer(id, cust_name, ph_num)`
           )
           .eq("rest_id", restId)
           .eq("status", "cancelled")
@@ -14482,6 +14582,51 @@ export default function Dashboard({ user, onLogout }) {
   const t = darkMode ? DARK : LIGHT;
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
 
+  // ── Load accept_delivery / accept_pickup from DB on mount ──────────────────
+  useEffect(() => {
+    if (!restId) return;
+    supabase
+      .from("Restaurants")
+      .select("accept_delivery, accept_pickup")
+      .eq("id", restId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) return; // columns may not exist yet; fail silently
+        setDelivery(data.accept_delivery ?? true);
+        setPickup(data.accept_pickup ?? true);
+      })
+      .catch(() => {}); // network error — keep defaults
+  }, [restId]);
+
+  // ── Persist toggle changes to DB ───────────────────────────────────────────
+  const handleDeliveryToggle = async (val) => {
+    setDelivery(val);
+    try {
+      const { error } = await supabase
+        .from("Restaurants")
+        .update({ accept_delivery: val })
+        .eq("id", restId);
+      if (error) throw error;
+    } catch (e) {
+      console.error("[Dashboard] save accept_delivery:", e);
+      setDelivery(!val); // revert optimistic update
+    }
+  };
+
+  const handlePickupToggle = async (val) => {
+    setPickup(val);
+    try {
+      const { error } = await supabase
+        .from("Restaurants")
+        .update({ accept_pickup: val })
+        .eq("id", restId);
+      if (error) throw error;
+    } catch (e) {
+      console.error("[Dashboard] save accept_pickup:", e);
+      setPickup(!val); // revert optimistic update
+    }
+  };
+
   // Live order counts for header badges
   useEffect(() => {
     if (!restId) return;
@@ -14660,7 +14805,7 @@ export default function Dashboard({ user, onLogout }) {
             >
               Delivery
             </span>
-            <Toggle value={delivery} onChange={setDelivery} t={t} />
+            <Toggle value={delivery} onChange={handleDeliveryToggle} t={t} />
           </div>
           <div
             style={{ background: t.surface2, border: `1px solid ${t.border2}` }}
@@ -14672,7 +14817,7 @@ export default function Dashboard({ user, onLogout }) {
             >
               Pickup
             </span>
-            <Toggle value={pickup} onChange={setPickup} t={t} />
+            <Toggle value={pickup} onChange={handlePickupToggle} t={t} />
           </div>
           <ThemeBtn
             dark={darkMode}
