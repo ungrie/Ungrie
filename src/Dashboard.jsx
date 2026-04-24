@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import "./index.css";
 
@@ -400,7 +401,7 @@ function printZReport({
   </table>
   <h2>Top Customers</h2>
   <table><thead><tr><th>Customer</th><th>Orders</th><th>Spent</th></tr></thead><tbody>${custRows || "<tr><td colspan='3' style='padding:12px;color:#aaa;text-align:center'>No data</td></tr>"}</tbody></table>
-  <div class="footer">FeastRush &nbsp;·&nbsp; ${restaurant?.name || ""} &nbsp;·&nbsp; Z-Report</div>
+  <div class="footer">Ungrie &nbsp;·&nbsp; ${restaurant?.name || ""} &nbsp;·&nbsp; Z-Report</div>
   <script>window.onload=()=>window.print()</script></body></html>`;
 
   const w = window.open("", "_blank");
@@ -2383,15 +2384,67 @@ function DeliveryPage({ t, user }) {
 }
 
 // ─── Customer Flip Card ───────────────────────────────────────────────────────
-function CustomerFlipCard({ customer, onClose, t }) {
+function CustomerFlipCard({ customer, onClose, t, restId }) {
   const [flipped, setFlipped] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [allTags, setAllTags] = useState([]);
+  const [customerTagIds, setCustomerTagIds] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [tagErr, setTagErr] = useState("");
 
   useEffect(() => {
-    // Trigger flip to back after mount
     const timer = setTimeout(() => setFlipped(true), 80);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!restId || !customer?.cust_id) {
+      setTagsLoading(false);
+      return;
+    }
+    (async () => {
+      try {
+        const [{ data: all }, { data: custT }] = await Promise.all([
+          supabase
+            .from("Tags")
+            .select("id,name,color")
+            .eq("rest_id", restId)
+            .order("name"),
+          supabase
+            .from("Customer_Tags")
+            .select("tag_id")
+            .eq("cust_id", customer.cust_id)
+            .eq("rest_id", restId),
+        ]);
+        setAllTags(all || []);
+        setCustomerTagIds((custT || []).map((r) => r.tag_id));
+      } catch {
+        /* non-critical */
+      } finally {
+        setTagsLoading(false);
+      }
+    })();
+  }, [restId, customer?.cust_id]);
+
+  const toggleTag = async (tag) => {
+    setTagErr("");
+    const isIn = customerTagIds.includes(tag.id);
+    if (isIn) {
+      const { error } = await supabase
+        .from("Customer_Tags")
+        .delete()
+        .eq("tag_id", tag.id)
+        .eq("cust_id", customer.cust_id);
+      if (!error) setCustomerTagIds((p) => p.filter((id) => id !== tag.id));
+    } else {
+      const { error } = await supabase
+        .from("Customer_Tags")
+        .insert({ tag_id: tag.id, cust_id: customer.cust_id, rest_id: restId });
+      if (!error) setCustomerTagIds((p) => [...p, tag.id]);
+      else if (!error?.message?.includes("unique"))
+        setTagErr("Failed to add tag.");
+    }
+  };
 
   const handleClose = () => {
     setFlipped(false);
@@ -2414,7 +2467,9 @@ function CustomerFlipCard({ customer, onClose, t }) {
     ["#14B8A6", "#ccfbf1"],
   ];
   const [accentColor, bgColor] =
-    avatarColors[Math.abs((c.name || "").charCodeAt(0) || 0) % avatarColors.length];
+    avatarColors[
+      Math.abs((c.name || "").charCodeAt(0) || 0) % avatarColors.length
+    ];
 
   return (
     <div
@@ -2436,13 +2491,13 @@ function CustomerFlipCard({ customer, onClose, t }) {
     >
       <style>{`
         .cust-flip-scene {
-          width: 340px;
+          width: 360px;
           max-width: 100%;
-          height: 420px;
+          height: 530px;
           perspective: 1200px;
         }
         @media (max-width: 400px) {
-          .cust-flip-scene { height: 460px; }
+          .cust-flip-scene { height: 570px; width: 100%; }
         }
         .cust-flip-card {
           width: 100%;
@@ -2486,21 +2541,41 @@ function CustomerFlipCard({ customer, onClose, t }) {
           {/* FRONT — decorative placeholder shown briefly */}
           <div
             className="cust-flip-front"
-            style={{ background: bgColor, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}
+            style={{
+              background: bgColor,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "column",
+              gap: 12,
+            }}
           >
             <div
               style={{
-                width: 80, height: 80, borderRadius: "50%",
+                width: 80,
+                height: 80,
+                borderRadius: "50%",
                 background: accentColor,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 32, fontWeight: 800, color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 32,
+                fontWeight: 800,
+                color: "#fff",
                 fontFamily: "'Cormorant Garamond', serif",
                 boxShadow: `0 8px 24px ${accentColor}55`,
               }}
             >
               {initials || "?"}
             </div>
-            <p style={{ color: accentColor, fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 700 }}>
+            <p
+              style={{
+                color: accentColor,
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 22,
+                fontWeight: 700,
+              }}
+            >
               {c.name}
             </p>
           </div>
@@ -2508,7 +2583,12 @@ function CustomerFlipCard({ customer, onClose, t }) {
           {/* BACK — full profile */}
           <div
             className="cust-flip-back"
-            style={{ background: t.surface, border: `1px solid ${t.border}`, display: "flex", flexDirection: "column" }}
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              display: "flex",
+              flexDirection: "column",
+            }}
           >
             {/* Header strip */}
             <div
@@ -2521,12 +2601,21 @@ function CustomerFlipCard({ customer, onClose, t }) {
               <button
                 onClick={handleClose}
                 style={{
-                  position: "absolute", top: 14, right: 14,
+                  position: "absolute",
+                  top: 14,
+                  right: 14,
                   background: "rgba(255,255,255,0.25)",
-                  border: "none", borderRadius: "50%",
-                  width: 28, height: 28,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700,
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 28,
+                  height: 28,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 700,
                 }}
               >
                 ✕
@@ -2534,10 +2623,16 @@ function CustomerFlipCard({ customer, onClose, t }) {
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                 <div
                   style={{
-                    width: 56, height: 56, borderRadius: "50%",
+                    width: 56,
+                    height: 56,
+                    borderRadius: "50%",
                     background: "rgba(255,255,255,0.25)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 22, fontWeight: 800, color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: "#fff",
                     fontFamily: "'Cormorant Garamond', serif",
                     border: "2px solid rgba(255,255,255,0.4)",
                     flexShrink: 0,
@@ -2546,10 +2641,25 @@ function CustomerFlipCard({ customer, onClose, t }) {
                   {initials || "?"}
                 </div>
                 <div>
-                  <p style={{ color: "#fff", fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 800, lineHeight: 1.2 }}>
+                  <p
+                    style={{
+                      color: "#fff",
+                      fontFamily: "'Cormorant Garamond', serif",
+                      fontSize: 20,
+                      fontWeight: 800,
+                      lineHeight: 1.2,
+                    }}
+                  >
                     {c.name}
                   </p>
-                  <p style={{ color: "rgba(255,255,255,0.75)", fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 2 }}>
+                  <p
+                    style={{
+                      color: "rgba(255,255,255,0.75)",
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 12,
+                      marginTop: 2,
+                    }}
+                  >
                     {c.phone !== "—" ? c.phone : "No phone on file"}
                   </p>
                 </div>
@@ -2581,14 +2691,23 @@ function CustomerFlipCard({ customer, onClose, t }) {
                   icon: "📅",
                   label: "Joined On",
                   value: c.joined
-                    ? new Date(c.joined).toLocaleDateString("en-KW", { day: "numeric", month: "long", year: "numeric" })
+                    ? new Date(c.joined).toLocaleDateString("en-KW", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })
                     : "—",
                   color: t.text,
                 },
                 {
                   icon: "📡",
                   label: "Broadcast",
-                  value: c.broadcast === true ? "Yes" : c.broadcast === false ? "No" : "—",
+                  value:
+                    c.broadcast === true
+                      ? "Yes"
+                      : c.broadcast === false
+                        ? "No"
+                        : "—",
                   color: c.broadcast ? t.green : t.muted,
                   badge: true,
                   badgeYes: c.broadcast === true,
@@ -2598,14 +2717,24 @@ function CustomerFlipCard({ customer, onClose, t }) {
                   key={idx}
                   className="cust-stat-row"
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                     padding: "11px 0",
                     borderBottom: idx < 4 ? `1px solid ${t.border}` : "none",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                  >
                     <span style={{ fontSize: 16 }}>{row.icon}</span>
-                    <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                    <span
+                      style={{
+                        color: t.subtle,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 13,
+                      }}
+                    >
                       {row.label}
                     </span>
                   </div>
@@ -2616,19 +2745,86 @@ function CustomerFlipCard({ customer, onClose, t }) {
                         border: `1px solid ${row.badgeYes ? t.greenBorder : t.border2}`,
                         color: row.badgeYes ? t.green : t.muted,
                         fontFamily: "'Lato', sans-serif",
-                        fontSize: 11, fontWeight: 700,
-                        padding: "3px 10px", borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "3px 10px",
+                        borderRadius: 999,
                       }}
                     >
                       {row.value}
                     </span>
                   ) : (
-                    <span style={{ color: row.color, fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 800 }}>
+                    <span
+                      style={{
+                        color: row.color,
+                        fontFamily: "'Cormorant Garamond', serif",
+                        fontSize: 17,
+                        fontWeight: 800,
+                      }}
+                    >
                       {row.value}
                     </span>
                   )}
                 </div>
               ))}
+
+              {/* Tags — inside scrollable stats container */}
+              <div style={{ paddingTop: 12, marginTop: 2 }}>
+                <p
+                  style={{
+                    color: t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  Audience Tags
+                </p>
+                {tagsLoading ? (
+                  <p style={{ color: t.muted, fontSize: 12 }}>Loading…</p>
+                ) : allTags.length === 0 ? (
+                  <p style={{ color: t.muted, fontSize: 12 }}>
+                    No tags yet. Go to Broadcast to create tags.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {allTags.map((tag) => {
+                      const isIn = customerTagIds.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          onClick={() => toggleTag(tag)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "4px 10px",
+                            borderRadius: 99,
+                            border: `1.5px solid ${tag.color}`,
+                            background: isIn ? tag.color : "transparent",
+                            color: isIn ? "#fff" : tag.color,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            transition: "all .15s",
+                          }}
+                        >
+                          {isIn ? "✓" : "+"} {tag.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {tagErr && (
+                  <p style={{ color: t.red, fontSize: 11, marginTop: 4 }}>
+                    ⚠️ {tagErr}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Last order footer */}
@@ -2641,8 +2837,20 @@ function CustomerFlipCard({ customer, onClose, t }) {
                   borderRadius: "0 0 20px 20px",
                 }}
               >
-                <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, textAlign: "center" }}>
-                  Last order: {new Date(c.lastOrder).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric" })}
+                <p
+                  style={{
+                    color: t.muted,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 11,
+                    textAlign: "center",
+                  }}
+                >
+                  Last order:{" "}
+                  {new Date(c.lastOrder).toLocaleDateString("en-KW", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
                 </p>
               </div>
             )}
@@ -2686,11 +2894,19 @@ function CustomersPage({ t, user }) {
       const custMap = {};
       (orders || []).forEach((o) => {
         if (!custMap[o.cust_id])
-          custMap[o.cust_id] = { cust_id: o.cust_id, orders: 0, revenue: 0, lastOrder: null };
+          custMap[o.cust_id] = {
+            cust_id: o.cust_id,
+            orders: 0,
+            revenue: 0,
+            lastOrder: null,
+          };
         custMap[o.cust_id].orders++;
         custMap[o.cust_id].revenue += Number(o.total_amount || 0);
         const d = new Date(o.created_at);
-        if (!custMap[o.cust_id].lastOrder || d > new Date(custMap[o.cust_id].lastOrder)) {
+        if (
+          !custMap[o.cust_id].lastOrder ||
+          d > new Date(custMap[o.cust_id].lastOrder)
+        ) {
           custMap[o.cust_id].lastOrder = o.created_at;
         }
       });
@@ -2709,7 +2925,9 @@ function CustomersPage({ t, user }) {
       if (pErr) throw pErr;
 
       const profileMap = {};
-      (profiles || []).forEach((p) => { profileMap[p.id] = p; });
+      (profiles || []).forEach((p) => {
+        profileMap[p.id] = p;
+      });
 
       const list = custIds.map((cid) => {
         const agg = custMap[cid];
@@ -2733,7 +2951,9 @@ function CustomersPage({ t, user }) {
     }
   }, [restId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const applyTopN = () => {
     const n = parseInt(topNInput, 10);
@@ -2743,7 +2963,10 @@ function CustomersPage({ t, user }) {
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
-    else { setSortBy(col); setSortDir("desc"); }
+    else {
+      setSortBy(col);
+      setSortDir("desc");
+    }
   };
 
   const filtered = [...customers]
@@ -2759,7 +2982,9 @@ function CustomersPage({ t, user }) {
       let diff = 0;
       if (sortBy === "orders") diff = b.orders - a.orders;
       else if (sortBy === "joined") {
-        diff = (b.joined ? new Date(b.joined).getTime() : 0) - (a.joined ? new Date(a.joined).getTime() : 0);
+        diff =
+          (b.joined ? new Date(b.joined).getTime() : 0) -
+          (a.joined ? new Date(a.joined).getTime() : 0);
       } else {
         diff = b.revenue - a.revenue;
       }
@@ -2768,8 +2993,15 @@ function CustomersPage({ t, user }) {
     .slice(0, filterMode === "Top Customers" ? Math.min(topN, 50) : topN);
 
   const SortIcon = ({ col }) => {
-    if (sortBy !== col) return <span style={{ color: t.muted, opacity: 0.4, fontSize: 10 }}>⇅</span>;
-    return <span style={{ color: t.accent, fontSize: 10 }}>{sortDir === "desc" ? "↓" : "↑"}</span>;
+    if (sortBy !== col)
+      return (
+        <span style={{ color: t.muted, opacity: 0.4, fontSize: 10 }}>⇅</span>
+      );
+    return (
+      <span style={{ color: t.accent, fontSize: 10 }}>
+        {sortDir === "desc" ? "↓" : "↑"}
+      </span>
+    );
   };
 
   const fmtJoined = (d) => {
@@ -2787,11 +3019,22 @@ function CustomersPage({ t, user }) {
 
   const fmtJoinedFull = (d) => {
     if (!d) return "—";
-    return new Date(d).toLocaleDateString("en-KW", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    return new Date(d).toLocaleDateString("en-KW", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
   };
 
   return (
-    <div style={{ padding: "24px 20px 40px", maxWidth: 1100, fontFamily: "'Lato', sans-serif" }}>
+    <div
+      style={{
+        padding: "24px 20px 40px",
+        maxWidth: 1100,
+        fontFamily: "'Lato', sans-serif",
+      }}
+    >
       <style>{`
         .cust-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 14px; }
         .cust-table { width: 100%; border-collapse: collapse; min-width: 640px; }
@@ -2847,12 +3090,37 @@ function CustomersPage({ t, user }) {
       `}</style>
 
       {/* Page header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: 20,
+        }}
+      >
         <div>
-          <h1 style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: "clamp(28px, 5vw, 38px)", fontWeight: 800, margin: 0, lineHeight: 1.1 }}>
+          <h1
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              color: t.text,
+              fontSize: "clamp(28px, 5vw, 38px)",
+              fontWeight: 800,
+              margin: 0,
+              lineHeight: 1.1,
+            }}
+          >
             Customers
           </h1>
-          <p style={{ color: t.subtle, fontSize: 13, margin: "4px 0 0", fontFamily: "'Lato', sans-serif" }}>
+          <p
+            style={{
+              color: t.subtle,
+              fontSize: 13,
+              margin: "4px 0 0",
+              fontFamily: "'Lato', sans-serif",
+            }}
+          >
             {loading
               ? "Loading…"
               : `${customers.length} total · showing ${filtered.length}`}
@@ -2861,10 +3129,15 @@ function CustomersPage({ t, user }) {
         <button
           onClick={load}
           style={{
-            background: t.surface2, border: `1px solid ${t.border2}`,
-            color: t.subtle, fontFamily: "'Lato', sans-serif",
-            fontSize: 12, fontWeight: 700, padding: "8px 14px",
-            borderRadius: 10, cursor: "pointer",
+            background: t.surface2,
+            border: `1px solid ${t.border2}`,
+            color: t.subtle,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 12,
+            fontWeight: 700,
+            padding: "8px 14px",
+            borderRadius: 10,
+            cursor: "pointer",
           }}
         >
           Refresh ↺
@@ -2872,15 +3145,41 @@ function CustomersPage({ t, user }) {
       </div>
 
       {err && (
-        <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#B83232", borderRadius: 10, padding: "10px 16px", fontSize: 13, marginBottom: 16 }}>
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#B83232",
+            borderRadius: 10,
+            padding: "10px 16px",
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
           ⚠️ {err}
         </div>
       )}
 
       {/* Controls bar */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          marginBottom: 16,
+          alignItems: "center",
+        }}
+      >
         {/* Search */}
-        <div className="cust-search-wrap" style={{ flex: "1 1 200px", minWidth: 180, maxWidth: 340, position: "relative" }}>
+        <div
+          className="cust-search-wrap"
+          style={{
+            flex: "1 1 200px",
+            minWidth: 180,
+            maxWidth: 340,
+            position: "relative",
+          }}
+        >
           <span className="cust-search-icon">🔍</span>
           <input
             type="text"
@@ -2888,10 +3187,15 @@ function CustomersPage({ t, user }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{
-              width: "100%", boxSizing: "border-box",
-              background: t.surface, border: `1px solid ${t.border2}`,
-              borderRadius: 10, padding: "9px 12px 9px 36px",
-              color: t.text, fontSize: 13, outline: "none",
+              width: "100%",
+              boxSizing: "border-box",
+              background: t.surface,
+              border: `1px solid ${t.border2}`,
+              borderRadius: 10,
+              padding: "9px 12px 9px 36px",
+              color: t.text,
+              fontSize: 13,
+              outline: "none",
               fontFamily: "'Lato', sans-serif",
             }}
           />
@@ -2902,10 +3206,15 @@ function CustomersPage({ t, user }) {
           value={filterMode}
           onChange={(e) => setFilterMode(e.target.value)}
           style={{
-            background: t.surface, border: `1px solid ${t.border2}`,
-            borderRadius: 10, padding: "9px 12px",
-            color: t.text, fontSize: 13, cursor: "pointer",
-            fontFamily: "'Lato', sans-serif", outline: "none",
+            background: t.surface,
+            border: `1px solid ${t.border2}`,
+            borderRadius: 10,
+            padding: "9px 12px",
+            color: t.text,
+            fontSize: 13,
+            cursor: "pointer",
+            fontFamily: "'Lato', sans-serif",
+            outline: "none",
           }}
         >
           <option>All Customers</option>
@@ -2913,19 +3222,44 @@ function CustomersPage({ t, user }) {
         </select>
 
         {/* Show N */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-          <span style={{ color: t.subtle, fontSize: 12, whiteSpace: "nowrap", fontWeight: 600 }}>Show top</span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            marginLeft: "auto",
+          }}
+        >
+          <span
+            style={{
+              color: t.subtle,
+              fontSize: 12,
+              whiteSpace: "nowrap",
+              fontWeight: 600,
+            }}
+          >
+            Show top
+          </span>
           <input
-            type="number" min={1} max={10000}
+            type="number"
+            min={1}
+            max={10000}
             value={topNInput}
             onChange={(e) => setTopNInput(e.target.value)}
             onBlur={applyTopN}
             onKeyDown={(e) => e.key === "Enter" && applyTopN()}
             style={{
-              width: 64, background: t.surface2, border: `1px solid ${t.border2}`,
-              borderRadius: 8, padding: "7px 10px",
-              color: t.text, fontSize: 13, textAlign: "center",
-              fontFamily: "'Lato', sans-serif", fontWeight: 700, outline: "none",
+              width: 64,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              borderRadius: 8,
+              padding: "7px 10px",
+              color: t.text,
+              fontSize: 13,
+              textAlign: "center",
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              outline: "none",
             }}
           />
         </div>
@@ -2933,33 +3267,111 @@ function CustomersPage({ t, user }) {
 
       {/* Table */}
       {loading ? (
-        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, overflow: "hidden" }}>
-          {[1,2,3,4,5].map((k) => (
-            <div key={k} style={{ padding: "16px 20px", borderBottom: `1px solid ${t.border}`, display: "flex", gap: 16, alignItems: "center" }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: t.surface2, flexShrink: 0 }} className="animate-pulse" />
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 14,
+            overflow: "hidden",
+          }}
+        >
+          {[1, 2, 3, 4, 5].map((k) => (
+            <div
+              key={k}
+              style={{
+                padding: "16px 20px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                gap: 16,
+                alignItems: "center",
+              }}
+            >
+              <div
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  background: t.surface2,
+                  flexShrink: 0,
+                }}
+                className="animate-pulse"
+              />
               <div style={{ flex: 1 }}>
-                <div style={{ height: 13, width: "45%", background: t.surface2, borderRadius: 6, marginBottom: 6 }} className="animate-pulse" />
-                <div style={{ height: 10, width: "28%", background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+                <div
+                  style={{
+                    height: 13,
+                    width: "45%",
+                    background: t.surface2,
+                    borderRadius: 6,
+                    marginBottom: 6,
+                  }}
+                  className="animate-pulse"
+                />
+                <div
+                  style={{
+                    height: 10,
+                    width: "28%",
+                    background: t.surface2,
+                    borderRadius: 6,
+                  }}
+                  className="animate-pulse"
+                />
               </div>
-              <div style={{ height: 13, width: 60, background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
-              <div style={{ height: 13, width: 80, background: t.surface2, borderRadius: 6 }} className="animate-pulse" />
+              <div
+                style={{
+                  height: 13,
+                  width: 60,
+                  background: t.surface2,
+                  borderRadius: 6,
+                }}
+                className="animate-pulse"
+              />
+              <div
+                style={{
+                  height: 13,
+                  width: 80,
+                  background: t.surface2,
+                  borderRadius: 6,
+                }}
+                className="animate-pulse"
+              />
             </div>
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: "60px 20px", textAlign: "center" }}>
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 14,
+            padding: "60px 20px",
+            textAlign: "center",
+          }}
+        >
           <div style={{ fontSize: 48, opacity: 0.2, marginBottom: 12 }}>👥</div>
-          <p style={{ color: t.text, fontWeight: 700, fontSize: 15, margin: 0 }}>
+          <p
+            style={{ color: t.text, fontWeight: 700, fontSize: 15, margin: 0 }}
+          >
             {search ? "No customers match your search" : "No customers yet"}
           </p>
           <p style={{ color: t.muted, fontSize: 13, marginTop: 6 }}>
-            {search ? "Try a different name or phone number." : "Customers will appear once orders are placed."}
+            {search
+              ? "Try a different name or phone number."
+              : "Customers will appear once orders are placed."}
           </p>
         </div>
       ) : (
-        <div className="cust-table-wrap" style={{ background: t.surface, border: `1px solid ${t.border}` }}>
+        <div
+          className="cust-table-wrap"
+          style={{ background: t.surface, border: `1px solid ${t.border}` }}
+        >
           <table className="cust-table">
-            <thead style={{ background: t.surface2, borderBottom: `2px solid ${t.border2}` }}>
+            <thead
+              style={{
+                background: t.surface2,
+                borderBottom: `2px solid ${t.border2}`,
+              }}
+            >
               <tr>
                 <th style={{ color: t.subtle, paddingLeft: 20 }}>#</th>
                 <th style={{ color: t.subtle }}>Customer Name</th>
@@ -2968,7 +3380,13 @@ function CustomersPage({ t, user }) {
                   style={{ color: sortBy === "orders" ? t.accent : t.subtle }}
                   onClick={() => toggleSort("orders")}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     Total Orders <SortIcon col="orders" />
                   </span>
                 </th>
@@ -2976,7 +3394,13 @@ function CustomersPage({ t, user }) {
                   style={{ color: sortBy === "revenue" ? t.accent : t.subtle }}
                   onClick={() => toggleSort("revenue")}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     Bill Total <SortIcon col="revenue" />
                   </span>
                 </th>
@@ -2985,20 +3409,35 @@ function CustomersPage({ t, user }) {
                   style={{ color: sortBy === "joined" ? t.accent : t.subtle }}
                   onClick={() => toggleSort("joined")}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     Joined On <SortIcon col="joined" />
                   </span>
                 </th>
-                <th style={{ color: t.subtle, textAlign: "center" }}>Details</th>
+                <th style={{ color: t.subtle, textAlign: "center" }}>
+                  Details
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((c, i) => {
                 const avatarColors = [
-                  ["#C4711A","#f5e6d3"],["#2D7A4F","#d4eddf"],
-                  ["#6366F1","#e0e7ff"],["#EC4899","#fce7f3"],["#14B8A6","#ccfbf1"],
+                  ["#C4711A", "#f5e6d3"],
+                  ["#2D7A4F", "#d4eddf"],
+                  ["#6366F1", "#e0e7ff"],
+                  ["#EC4899", "#fce7f3"],
+                  ["#14B8A6", "#ccfbf1"],
                 ];
-                const [ac, bgc] = avatarColors[Math.abs((c.name||"").charCodeAt(0)||0) % avatarColors.length];
+                const [ac, bgc] =
+                  avatarColors[
+                    Math.abs((c.name || "").charCodeAt(0) || 0) %
+                      avatarColors.length
+                  ];
                 const isTop3 = filterMode === "Top Customers" && i < 3;
                 const medalEmoji = i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉";
                 return (
@@ -3010,17 +3449,44 @@ function CustomersPage({ t, user }) {
                     }}
                   >
                     {/* Rank */}
-                    <td style={{ color: t.muted, fontWeight: 700, fontSize: 12, paddingLeft: 20, width: 48 }}>
+                    <td
+                      style={{
+                        color: t.muted,
+                        fontWeight: 700,
+                        fontSize: 12,
+                        paddingLeft: 20,
+                        width: 48,
+                      }}
+                    >
                       {isTop3 ? medalEmoji : `#${i + 1}`}
                     </td>
 
                     {/* Name + avatar */}
                     <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div className="cust-avatar" style={{ background: bgc, color: ac, minWidth: 34 }}>
-                          {(c.name || "?").split(" ").slice(0,2).map(w => w[0]?.toUpperCase()||"").join("") || "?"}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <div
+                          className="cust-avatar"
+                          style={{ background: bgc, color: ac, minWidth: 34 }}
+                        >
+                          {(c.name || "?")
+                            .split(" ")
+                            .slice(0, 2)
+                            .map((w) => w[0]?.toUpperCase() || "")
+                            .join("") || "?"}
                         </div>
-                        <span style={{ color: t.text, fontWeight: 600, fontSize: 13 }}>
+                        <span
+                          style={{
+                            color: t.text,
+                            fontWeight: 600,
+                            fontSize: 13,
+                          }}
+                        >
                           {c.name}
                         </span>
                       </div>
@@ -3028,25 +3494,39 @@ function CustomersPage({ t, user }) {
 
                     {/* Phone */}
                     <td style={{ color: t.subtle }}>
-                      {c.phone !== "—" ? c.phone : <span style={{ color: t.muted, fontStyle: "italic" }}>—</span>}
+                      {c.phone !== "—" ? (
+                        c.phone
+                      ) : (
+                        <span style={{ color: t.muted, fontStyle: "italic" }}>
+                          —
+                        </span>
+                      )}
                     </td>
 
                     {/* Orders */}
                     <td>
-                      <span style={{
-                        color: t.accent, fontWeight: 800,
-                        fontFamily: "'Cormorant Garamond', serif", fontSize: 16,
-                      }}>
+                      <span
+                        style={{
+                          color: t.accent,
+                          fontWeight: 800,
+                          fontFamily: "'Cormorant Garamond', serif",
+                          fontSize: 16,
+                        }}
+                      >
                         {c.orders}
                       </span>
                     </td>
 
                     {/* Bill Total */}
                     <td>
-                      <span style={{
-                        color: t.green, fontWeight: 800,
-                        fontFamily: "'Cormorant Garamond', serif", fontSize: 15,
-                      }}>
+                      <span
+                        style={{
+                          color: t.green,
+                          fontWeight: 800,
+                          fontFamily: "'Cormorant Garamond', serif",
+                          fontSize: 15,
+                        }}
+                      >
                         KD {Number(c.revenue || 0).toFixed(3)}
                       </span>
                     </td>
@@ -3054,30 +3534,60 @@ function CustomersPage({ t, user }) {
                     {/* Broadcast */}
                     <td>
                       {c.broadcast === true ? (
-                        <span style={{
-                          background: t.greenBg, border: `1px solid ${t.greenBorder}`,
-                          color: t.green, borderRadius: 999, padding: "3px 10px",
-                          fontSize: 11, fontWeight: 700,
-                        }}>Yes</span>
+                        <span
+                          style={{
+                            background: t.greenBg,
+                            border: `1px solid ${t.greenBorder}`,
+                            color: t.green,
+                            borderRadius: 999,
+                            padding: "3px 10px",
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Yes
+                        </span>
                       ) : c.broadcast === false ? (
-                        <span style={{
-                          background: t.surface2, border: `1px solid ${t.border2}`,
-                          color: t.muted, borderRadius: 999, padding: "3px 10px",
-                          fontSize: 11, fontWeight: 700,
-                        }}>No</span>
+                        <span
+                          style={{
+                            background: t.surface2,
+                            border: `1px solid ${t.border2}`,
+                            color: t.muted,
+                            borderRadius: 999,
+                            padding: "3px 10px",
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          No
+                        </span>
                       ) : (
-                        <span style={{ color: t.muted, fontStyle: "italic" }}>—</span>
+                        <span style={{ color: t.muted, fontStyle: "italic" }}>
+                          —
+                        </span>
                       )}
                     </td>
 
                     {/* Joined */}
                     <td>
                       <div>
-                        <div style={{ color: t.text, fontWeight: 700, fontSize: 12 }}>
+                        <div
+                          style={{
+                            color: t.text,
+                            fontWeight: 700,
+                            fontSize: 12,
+                          }}
+                        >
                           {fmtJoined(c.joined)}
                         </div>
                         {c.joined && (
-                          <div style={{ color: t.muted, fontSize: 11, marginTop: 1 }}>
+                          <div
+                            style={{
+                              color: t.muted,
+                              fontSize: 11,
+                              marginTop: 1,
+                            }}
+                          >
                             {fmtJoinedFull(c.joined)}
                           </div>
                         )}
@@ -3089,7 +3599,11 @@ function CustomersPage({ t, user }) {
                       <button
                         className="cust-detail-btn"
                         onClick={() => setSelectedCustomer(c)}
-                        style={{ color: t.accent, background: t.accentBg, border: `1px solid ${t.accentBorder}` }}
+                        style={{
+                          color: t.accent,
+                          background: t.accentBg,
+                          border: `1px solid ${t.accentBorder}`,
+                        }}
                         title="View customer details"
                       >
                         ℹ
@@ -3109,6 +3623,7 @@ function CustomersPage({ t, user }) {
           customer={selectedCustomer}
           onClose={() => setSelectedCustomer(null)}
           t={t}
+          restId={restId}
         />
       )}
     </div>
@@ -3149,51 +3664,66 @@ function DiscountsPage({ t, user }) {
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
 
   // ── state ──────────────────────────────────────────────────────────────────
-  const [subPlan, setSubPlan]       = useState(null);  // 'Basic' | 'Premium' etc.
-  const [discounts, setDiscounts]   = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [err, setErr]               = useState(null);
-  const [search, setSearch]         = useState("");
+  const [subPlan, setSubPlan] = useState(null); // 'Basic' | 'Premium' etc.
+  const [discounts, setDiscounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [search, setSearch] = useState("");
 
   // modal state
-  const [modalOpen, setModalOpen]   = useState(false);
-  const [editing, setEditing]       = useState(null);  // discount obj being edited, or null = new
-  const [saving, setSaving]         = useState(false);
-  const [modalErr, setModalErr]     = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null); // discount obj being edited, or null = new
+  const [saving, setSaving] = useState(false);
+  const [modalErr, setModalErr] = useState("");
 
   // redemptions drawer
-  const [redeemDisc, setRedeemDisc] = useState(null);  // discount to show redemptions for
+  const [redeemDisc, setRedeemDisc] = useState(null); // discount to show redemptions for
   const [redemptions, setRedemptions] = useState([]);
   const [redeemLoading, setRedeemLoading] = useState(false);
 
   // form fields
   const emptyForm = {
-    code: "", type: "percentage", value: "",
-    min_order: "", max_order: "",
-    avail_from: "", expiry_date: "",
-    is_active: true, max_uses_per_customer: 1,
+    code: "",
+    type: "percentage",
+    value: "",
+    min_order: "",
+    max_order: "",
+    avail_from: "",
+    expiry_date: "",
+    is_active: true,
+    max_uses_per_customer: 1,
   };
   const [form, setForm] = useState(emptyForm);
-  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   // ── load restaurant plan + discounts ──────────────────────────────────────
   const load = useCallback(async () => {
-    if (!restId) { setLoading(false); setErr("No restaurant linked."); return; }
-    setLoading(true); setErr(null);
+    if (!restId) {
+      setLoading(false);
+      setErr("No restaurant linked.");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
     try {
       // fetch sub_plan
       const { data: rest } = await supabase
-        .from("Restaurants").select("sub_plan").eq("id", restId).maybeSingle();
+        .from("Restaurants")
+        .select("sub_plan")
+        .eq("id", restId)
+        .maybeSingle();
       setSubPlan(rest?.sub_plan || "Basic");
 
       // fetch discounts + redemption stats in one go
       const { data: rows, error: dErr } = await supabase
         .from("Discounts")
-        .select(`
+        .select(
+          `
           id, code, type, value, min_order, max_order,
           avail_from, expiry_date, is_active, max_uses_per_customer, created_at,
           Discount_Redemptions(id, amount_saved)
-        `)
+        `,
+        )
         .eq("rest_id", restId)
         .order("created_at", { ascending: false });
       if (dErr) throw dErr;
@@ -3202,14 +3732,22 @@ function DiscountsPage({ t, user }) {
     } catch (e) {
       console.error("[DiscountsPage]", e);
       setErr(e.message || "Failed to load discounts.");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [restId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // ── computed helpers ───────────────────────────────────────────────────────
-  const isExpired = (d) => d?.expiry_date && new Date(d.expiry_date) < new Date(new Date().toDateString());
-  const isNotStarted = (d) => d?.avail_from && new Date(d.avail_from) > new Date(new Date().toDateString());
+  const isExpired = (d) =>
+    d?.expiry_date &&
+    new Date(d.expiry_date) < new Date(new Date().toDateString());
+  const isNotStarted = (d) =>
+    d?.avail_from &&
+    new Date(d.avail_from) > new Date(new Date().toDateString());
 
   const effectiveStatus = (d) => {
     if (!d.is_active) return "inactive";
@@ -3219,26 +3757,51 @@ function DiscountsPage({ t, user }) {
   };
 
   const statusMeta = {
-    active:    { label: "Active",    bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
-    inactive:  { label: "Inactive",  bg: "#f1f5f9", color: "#64748b", border: "#e2e8f0" },
-    expired:   { label: "Expired",   bg: "#fee2e2", color: "#b91c1c", border: "#fecaca" },
-    scheduled: { label: "Scheduled", bg: "#fef9c3", color: "#92400e", border: "#fde68a" },
+    active: {
+      label: "Active",
+      bg: "#dcfce7",
+      color: "#15803d",
+      border: "#bbf7d0",
+    },
+    inactive: {
+      label: "Inactive",
+      bg: "#f1f5f9",
+      color: "#64748b",
+      border: "#e2e8f0",
+    },
+    expired: {
+      label: "Expired",
+      bg: "#fee2e2",
+      color: "#b91c1c",
+      border: "#fecaca",
+    },
+    scheduled: {
+      label: "Scheduled",
+      bg: "#fef9c3",
+      color: "#92400e",
+      border: "#fde68a",
+    },
   };
 
   const discountLabel = (d) =>
-    d.type === "percentage" ? `${d.value}% off` : `KD ${Number(d.value).toFixed(3)} off`;
+    d.type === "percentage"
+      ? `${d.value}% off`
+      : `KD ${Number(d.value).toFixed(3)} off`;
 
-  const filteredDiscounts = discounts.filter(d =>
-    d.code.toLowerCase().includes(search.toLowerCase())
+  const filteredDiscounts = discounts.filter((d) =>
+    d.code.toLowerCase().includes(search.toLowerCase()),
   );
 
   // aggregate stats
-  const totalStats = discounts.reduce((acc, d) => {
-    const reds = d.Discount_Redemptions || [];
-    acc.redemptions += reds.length;
-    acc.saved += reds.reduce((s, r) => s + Number(r.amount_saved || 0), 0);
-    return acc;
-  }, { redemptions: 0, saved: 0 });
+  const totalStats = discounts.reduce(
+    (acc, d) => {
+      const reds = d.Discount_Redemptions || [];
+      acc.redemptions += reds.length;
+      acc.saved += reds.reduce((s, r) => s + Number(r.amount_saved || 0), 0);
+      return acc;
+    },
+    { redemptions: 0, saved: 0 },
+  );
 
   // ── open/close modal ───────────────────────────────────────────────────────
   const openNew = () => {
@@ -3269,10 +3832,13 @@ function DiscountsPage({ t, user }) {
   const validate = () => {
     const code = form.code.trim().toUpperCase();
     if (!code) return "Discount code is required.";
-    if (!/^[A-Z0-9_-]+$/.test(code)) return "Code may only contain letters, numbers, _ and -.";
+    if (!/^[A-Z0-9_-]+$/.test(code))
+      return "Code may only contain letters, numbers, _ and -.";
     const val = Number(form.value);
-    if (!form.value || isNaN(val) || val <= 0) return "Discount value must be a positive number.";
-    if (form.type === "percentage" && val > 100) return "Percentage cannot exceed 100%.";
+    if (!form.value || isNaN(val) || val <= 0)
+      return "Discount value must be a positive number.";
+    if (form.type === "percentage" && val > 100)
+      return "Percentage cannot exceed 100%.";
     const minO = Number(form.min_order || 0);
     if (isNaN(minO) || minO < 0) return "Minimum order must be 0 or more.";
     if (form.type === "fixed" && val >= minO && minO > 0)
@@ -3281,21 +3847,31 @@ function DiscountsPage({ t, user }) {
       return "For a fixed discount, please set a minimum order value greater than the discount amount.";
     if (form.max_order) {
       const maxO = Number(form.max_order);
-      if (isNaN(maxO) || maxO <= 0) return "Max order must be a positive number.";
+      if (isNaN(maxO) || maxO <= 0)
+        return "Max order must be a positive number.";
       if (maxO <= minO) return "Max order must be greater than min order.";
     }
-    if (form.avail_from && form.expiry_date && form.avail_from > form.expiry_date)
+    if (
+      form.avail_from &&
+      form.expiry_date &&
+      form.avail_from > form.expiry_date
+    )
       return "Available from date cannot be after expiry date.";
     const mup = Number(form.max_uses_per_customer);
-    if (isNaN(mup) || mup < 1) return "Max uses per customer must be at least 1.";
+    if (isNaN(mup) || mup < 1)
+      return "Max uses per customer must be at least 1.";
     return null;
   };
 
   // ── save ──────────────────────────────────────────────────────────────────
   const save = async () => {
     const validationError = validate();
-    if (validationError) { setModalErr(validationError); return; }
-    setSaving(true); setModalErr("");
+    if (validationError) {
+      setModalErr(validationError);
+      return;
+    }
+    setSaving(true);
+    setModalErr("");
     try {
       const payload = {
         rest_id: restId,
@@ -3310,12 +3886,18 @@ function DiscountsPage({ t, user }) {
         max_uses_per_customer: Number(form.max_uses_per_customer),
       };
       if (editing) {
-        const { error } = await supabase.from("Discounts").update(payload).eq("id", editing.id);
+        const { error } = await supabase
+          .from("Discounts")
+          .update(payload)
+          .eq("id", editing.id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("Discounts").insert(payload);
         if (error) {
-          if (error.code === "23505") throw new Error("A discount with this code already exists for your restaurant.");
+          if (error.code === "23505")
+            throw new Error(
+              "A discount with this code already exists for your restaurant.",
+            );
           throw error;
         }
       }
@@ -3323,19 +3905,30 @@ function DiscountsPage({ t, user }) {
       load();
     } catch (e) {
       setModalErr(e.message || "Failed to save discount.");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── toggle active (with expiry guard) ─────────────────────────────────────
   const toggleActive = async (d) => {
     // If trying to re-activate an expired code, block
     if (!d.is_active && isExpired(d)) {
-      alert("This code has expired. Please edit the expiry date before re-activating.");
+      alert(
+        "This code has expired. Please edit the expiry date before re-activating.",
+      );
       return;
     }
     try {
-      await supabase.from("Discounts").update({ is_active: !d.is_active }).eq("id", d.id);
-      setDiscounts(prev => prev.map(x => x.id === d.id ? { ...x, is_active: !x.is_active } : x));
+      await supabase
+        .from("Discounts")
+        .update({ is_active: !d.is_active })
+        .eq("id", d.id);
+      setDiscounts((prev) =>
+        prev.map((x) =>
+          x.id === d.id ? { ...x, is_active: !x.is_active } : x,
+        ),
+      );
     } catch (e) {
       alert("Failed to update status: " + e.message);
     }
@@ -3343,10 +3936,11 @@ function DiscountsPage({ t, user }) {
 
   // ── delete ─────────────────────────────────────────────────────────────────
   const deleteDiscount = async (d) => {
-    if (!window.confirm(`Delete code "${d.code}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete code "${d.code}"? This cannot be undone.`))
+      return;
     try {
       await supabase.from("Discounts").delete().eq("id", d.id);
-      setDiscounts(prev => prev.filter(x => x.id !== d.id));
+      setDiscounts((prev) => prev.filter((x) => x.id !== d.id));
     } catch (e) {
       alert("Failed to delete: " + e.message);
     }
@@ -3359,60 +3953,134 @@ function DiscountsPage({ t, user }) {
     try {
       const { data, error } = await supabase
         .from("Discount_Redemptions")
-        .select("id, amount_saved, created_at, cust_id, order_id, Customer(cust_name, ph_num)")
+        .select(
+          "id, amount_saved, created_at, cust_id, order_id, Customer(cust_name, ph_num)",
+        )
         .eq("discount_id", d.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
       setRedemptions(data || []);
     } catch (e) {
       setRedemptions([]);
-    } finally { setRedeemLoading(false); }
+    } finally {
+      setRedeemLoading(false);
+    }
   };
 
-  const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const fmtDate = (d) =>
+    d
+      ? new Date(d).toLocaleDateString("en-KW", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : "—";
 
   // ── Premium gate ──────────────────────────────────────────────────────────
   if (!loading && subPlan === "Basic") {
     return (
-      <div style={{ padding: "40px 24px", maxWidth: 560, margin: "0 auto", fontFamily: "'Lato', sans-serif" }}>
+      <div
+        style={{
+          padding: "40px 24px",
+          maxWidth: 560,
+          margin: "0 auto",
+          fontFamily: "'Lato', sans-serif",
+        }}
+      >
         <style>{`
           @keyframes discFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
           .disc-float { animation: discFloat 3s ease-in-out infinite; }
         `}</style>
-        <div style={{
-          background: t.surface, border: `1px solid ${t.border}`,
-          borderRadius: 20, padding: "48px 36px", textAlign: "center",
-          boxShadow: `0 4px 24px ${t.accent}14`,
-        }}>
-          <div className="disc-float" style={{ fontSize: 64, marginBottom: 20 }}>🏷️</div>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 28, fontWeight: 800, margin: "0 0 10px" }}>
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 20,
+            padding: "48px 36px",
+            textAlign: "center",
+            boxShadow: `0 4px 24px ${t.accent}14`,
+          }}
+        >
+          <div
+            className="disc-float"
+            style={{ fontSize: 64, marginBottom: 20 }}
+          >
+            🏷️
+          </div>
+          <h2
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              color: t.text,
+              fontSize: 28,
+              fontWeight: 800,
+              margin: "0 0 10px",
+            }}
+          >
             Unlock Discount Codes
           </h2>
-          <p style={{ color: t.subtle, fontSize: 14, lineHeight: 1.6, margin: "0 0 28px" }}>
-            Discount codes, promo campaigns, and coupon analytics are available on our
-            <strong style={{ color: t.accent }}> Premium plan</strong>.
-            Upgrade to start rewarding your customers and driving more orders.
+          <p
+            style={{
+              color: t.subtle,
+              fontSize: 14,
+              lineHeight: 1.6,
+              margin: "0 0 28px",
+            }}
+          >
+            Discount codes, promo campaigns, and coupon analytics are available
+            on our
+            <strong style={{ color: t.accent }}> Premium plan</strong>. Upgrade
+            to start rewarding your customers and driving more orders.
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", marginBottom: 28 }}>
-            {["Percentage & fixed discounts","Per-customer usage limits","Redemption analytics","Expiry & availability dates","Sales revenue tracking"].map(f => (
-              <span key={f} style={{
-                background: t.accentBg, border: `1px solid ${t.accentBorder}`,
-                color: t.accent, borderRadius: 999, padding: "5px 14px", fontSize: 12, fontWeight: 700,
-              }}>✓ {f}</span>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              justifyContent: "center",
+              marginBottom: 28,
+            }}
+          >
+            {[
+              "Percentage & fixed discounts",
+              "Per-customer usage limits",
+              "Redemption analytics",
+              "Expiry & availability dates",
+              "Sales revenue tracking",
+            ].map((f) => (
+              <span
+                key={f}
+                style={{
+                  background: t.accentBg,
+                  border: `1px solid ${t.accentBorder}`,
+                  color: t.accent,
+                  borderRadius: 999,
+                  padding: "5px 14px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                ✓ {f}
+              </span>
             ))}
           </div>
           <a
             href="/#pricing"
             style={{
-              display: "inline-flex", alignItems: "center", gap: 8,
-              background: t.accent, color: "#fff",
-              borderRadius: 12, padding: "14px 32px",
-              fontSize: 15, fontWeight: 700, textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              background: t.accent,
+              color: "#fff",
+              borderRadius: 12,
+              padding: "14px 32px",
+              fontSize: 15,
+              fontWeight: 700,
+              textDecoration: "none",
               boxShadow: `0 4px 16px ${t.accent}44`,
               transition: "opacity .2s",
             }}
-            onMouseOver={e => e.currentTarget.style.opacity = "0.88"}
-            onMouseOut={e => e.currentTarget.style.opacity = "1"}
+            onMouseOver={(e) => (e.currentTarget.style.opacity = "0.88")}
+            onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
           >
             🚀 View Pricing Plans
           </a>
@@ -3426,7 +4094,13 @@ function DiscountsPage({ t, user }) {
 
   // ── Main UI ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: "24px 20px 60px", maxWidth: 1100, fontFamily: "'Lato', sans-serif" }}>
+    <div
+      style={{
+        padding: "24px 20px 60px",
+        maxWidth: 1100,
+        fontFamily: "'Lato', sans-serif",
+      }}
+    >
       <style>{`
         .disc-table { width: 100%; border-collapse: collapse; min-width: 700px; }
         .disc-table thead th {
@@ -3491,23 +4165,50 @@ function DiscountsPage({ t, user }) {
       `}</style>
 
       {/* ── Header ── */}
-      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12, marginBottom:22 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: 22,
+        }}
+      >
         <div>
-          <h1 style={{ fontFamily:"'Cormorant Garamond',serif", color:t.text, fontSize:"clamp(26px,5vw,36px)", fontWeight:800, margin:0, lineHeight:1.1 }}>
+          <h1
+            style={{
+              fontFamily: "'Cormorant Garamond',serif",
+              color: t.text,
+              fontSize: "clamp(26px,5vw,36px)",
+              fontWeight: 800,
+              margin: 0,
+              lineHeight: 1.1,
+            }}
+          >
             Discount Codes
           </h1>
-          <p style={{ color:t.subtle, fontSize:13, margin:"4px 0 0" }}>
-            {loading ? "Loading…" : `${discounts.length} code${discounts.length !== 1 ? "s" : ""}`}
+          <p style={{ color: t.subtle, fontSize: 13, margin: "4px 0 0" }}>
+            {loading
+              ? "Loading…"
+              : `${discounts.length} code${discounts.length !== 1 ? "s" : ""}`}
           </p>
         </div>
         <button
           onClick={openNew}
           style={{
-            background:t.accent, color:"#fff",
-            border:"none", borderRadius:12,
-            padding:"10px 20px", fontSize:13, fontWeight:700,
-            cursor:"pointer", display:"flex", alignItems:"center", gap:7,
-            boxShadow:`0 4px 14px ${t.accent}44`,
+            background: t.accent,
+            color: "#fff",
+            border: "none",
+            borderRadius: 12,
+            padding: "10px 20px",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            boxShadow: `0 4px 14px ${t.accent}44`,
           }}
         >
           + New Discount Code
@@ -3515,73 +4216,217 @@ function DiscountsPage({ t, user }) {
       </div>
 
       {err && (
-        <div style={{ background:"#FEF2F2", border:"1px solid #FECACA", color:"#B83232", borderRadius:10, padding:"10px 16px", fontSize:13, marginBottom:16 }}>
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#B83232",
+            borderRadius: 10,
+            padding: "10px 16px",
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
           ⚠️ {err}
         </div>
       )}
 
       {/* ── Summary stat cards ── */}
       {!loading && (
-        <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:22 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 22,
+          }}
+        >
           {[
-            { label:"Total Codes", value:discounts.length, icon:"🏷️", color:t.accent },
-            { label:"Active", value:discounts.filter(d=>effectiveStatus(d)==="active").length, icon:"✅", color:t.green },
-            { label:"Total Redemptions", value:totalStats.redemptions, icon:"🔄", color:"#6366f1" },
-            { label:"Total Savings Given", value:`KD ${totalStats.saved.toFixed(3)}`, icon:"💰", color:"#f59e0b" },
-          ].map(s => (
-            <div key={s.label} className="disc-stat-card" style={{ background:t.surface, border:`1px solid ${t.border}` }}>
-              <div style={{ fontSize:20, marginBottom:6 }}>{s.icon}</div>
-              <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:22, fontWeight:800, color:s.color }}>{s.value}</div>
-              <div style={{ color:t.muted, fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:".06em", marginTop:2 }}>{s.label}</div>
+            {
+              label: "Total Codes",
+              value: discounts.length,
+              icon: "🏷️",
+              color: t.accent,
+            },
+            {
+              label: "Active",
+              value: discounts.filter((d) => effectiveStatus(d) === "active")
+                .length,
+              icon: "✅",
+              color: t.green,
+            },
+            {
+              label: "Total Redemptions",
+              value: totalStats.redemptions,
+              icon: "🔄",
+              color: "#6366f1",
+            },
+            {
+              label: "Total Savings Given",
+              value: `KD ${totalStats.saved.toFixed(3)}`,
+              icon: "💰",
+              color: "#f59e0b",
+            },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="disc-stat-card"
+              style={{ background: t.surface, border: `1px solid ${t.border}` }}
+            >
+              <div style={{ fontSize: 20, marginBottom: 6 }}>{s.icon}</div>
+              <div
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  fontSize: 22,
+                  fontWeight: 800,
+                  color: s.color,
+                }}
+              >
+                {s.value}
+              </div>
+              <div
+                style={{
+                  color: t.muted,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
+                  marginTop: 2,
+                }}
+              >
+                {s.label}
+              </div>
             </div>
           ))}
         </div>
       )}
 
       {/* ── Search bar ── */}
-      <div style={{ position:"relative", maxWidth:320, marginBottom:16 }}>
-        <span style={{ position:"absolute", left:11, top:"50%", transform:"translateY(-50%)", opacity:.4, fontSize:15, pointerEvents:"none" }}>🔍</span>
-        <input
-          type="text" placeholder="Search codes…"
-          value={search} onChange={e=>setSearch(e.target.value)}
+      <div style={{ position: "relative", maxWidth: 320, marginBottom: 16 }}>
+        <span
           style={{
-            width:"100%", boxSizing:"border-box",
-            background:t.surface, border:`1px solid ${t.border2}`,
-            borderRadius:10, padding:"9px 12px 9px 34px",
-            color:t.text, fontSize:13, outline:"none",
-            fontFamily:"'Lato',sans-serif",
+            position: "absolute",
+            left: 11,
+            top: "50%",
+            transform: "translateY(-50%)",
+            opacity: 0.4,
+            fontSize: 15,
+            pointerEvents: "none",
+          }}
+        >
+          🔍
+        </span>
+        <input
+          type="text"
+          placeholder="Search codes…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            background: t.surface,
+            border: `1px solid ${t.border2}`,
+            borderRadius: 10,
+            padding: "9px 12px 9px 34px",
+            color: t.text,
+            fontSize: 13,
+            outline: "none",
+            fontFamily: "'Lato',sans-serif",
           }}
         />
       </div>
 
       {/* ── Table ── */}
       {loading ? (
-        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:14, overflow:"hidden" }}>
-          {[1,2,3].map(k=>(
-            <div key={k} style={{ padding:"16px 20px", borderBottom:`1px solid ${t.border}`, display:"flex", gap:16 }}>
-              {[140,80,100,80,70].map((w,i)=>(
-                <div key={i} style={{ height:13, width:w, background:t.surface2, borderRadius:6 }} className="animate-pulse" />
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 14,
+            overflow: "hidden",
+          }}
+        >
+          {[1, 2, 3].map((k) => (
+            <div
+              key={k}
+              style={{
+                padding: "16px 20px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                gap: 16,
+              }}
+            >
+              {[140, 80, 100, 80, 70].map((w, i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: 13,
+                    width: w,
+                    background: t.surface2,
+                    borderRadius: 6,
+                  }}
+                  className="animate-pulse"
+                />
               ))}
             </div>
           ))}
         </div>
       ) : filteredDiscounts.length === 0 ? (
-        <div style={{ background:t.surface, border:`1px solid ${t.border}`, borderRadius:14, padding:"60px 20px", textAlign:"center" }}>
-          <div style={{ fontSize:48, opacity:.2, marginBottom:12 }}>🏷️</div>
-          <p style={{ color:t.text, fontWeight:700, fontSize:15, margin:0 }}>
+        <div
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border}`,
+            borderRadius: 14,
+            padding: "60px 20px",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 48, opacity: 0.2, marginBottom: 12 }}>🏷️</div>
+          <p
+            style={{ color: t.text, fontWeight: 700, fontSize: 15, margin: 0 }}
+          >
             {search ? "No codes match your search" : "No discount codes yet"}
           </p>
-          <p style={{ color:t.muted, fontSize:13, marginTop:6 }}>
-            {search ? "Try a different search term." : "Click '+ New Discount Code' to create your first one."}
+          <p style={{ color: t.muted, fontSize: 13, marginTop: 6 }}>
+            {search
+              ? "Try a different search term."
+              : "Click '+ New Discount Code' to create your first one."}
           </p>
         </div>
       ) : (
-        <div style={{ overflowX:"auto", borderRadius:14, border:`1px solid ${t.border}`, background:t.surface }}>
+        <div
+          style={{
+            overflowX: "auto",
+            borderRadius: 14,
+            border: `1px solid ${t.border}`,
+            background: t.surface,
+          }}
+        >
           <table className="disc-table">
-            <thead style={{ background:t.surface2, borderBottom:`2px solid ${t.border2}` }}>
+            <thead
+              style={{
+                background: t.surface2,
+                borderBottom: `2px solid ${t.border2}`,
+              }}
+            >
               <tr>
-                {["Code","Type","Value","Min Order","Max Order","Availability","Expiry","Status","Uses/Cust","Redemptions","Sales","Actions"].map(h=>(
-                  <th key={h} style={{ color:t.subtle }}>{h}</th>
+                {[
+                  "Code",
+                  "Type",
+                  "Value",
+                  "Min Order",
+                  "Max Order",
+                  "Availability",
+                  "Expiry",
+                  "Status",
+                  "Uses/Cust",
+                  "Redemptions",
+                  "Sales",
+                  "Actions",
+                ].map((h) => (
+                  <th key={h} style={{ color: t.subtle }}>
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -3590,72 +4435,161 @@ function DiscountsPage({ t, user }) {
                 const status = effectiveStatus(d);
                 const sm = statusMeta[status];
                 const reds = d.Discount_Redemptions || [];
-                const totalSaved = reds.reduce((s,r) => s+Number(r.amount_saved||0), 0);
+                const totalSaved = reds.reduce(
+                  (s, r) => s + Number(r.amount_saved || 0),
+                  0,
+                );
                 return (
-                  <tr key={d.id} style={{
-                    background: i%2===0 ? t.surface : t.surface2+"88",
-                    borderBottomColor: t.border,
-                  }}>
+                  <tr
+                    key={d.id}
+                    style={{
+                      background: i % 2 === 0 ? t.surface : t.surface2 + "88",
+                      borderBottomColor: t.border,
+                    }}
+                  >
                     {/* Code */}
                     <td>
-                      <span style={{
-                        fontFamily:"'Cormorant Garamond',serif",
-                        fontWeight:800, fontSize:16, color:t.text,
-                        letterSpacing:".04em",
-                      }}>{d.code}</span>
+                      <span
+                        style={{
+                          fontFamily: "'Cormorant Garamond',serif",
+                          fontWeight: 800,
+                          fontSize: 16,
+                          color: t.text,
+                          letterSpacing: ".04em",
+                        }}
+                      >
+                        {d.code}
+                      </span>
                     </td>
                     {/* Type */}
                     <td>
-                      <span style={{
-                        background: d.type==="percentage" ? "#ede9fe" : "#dcfce7",
-                        color: d.type==="percentage" ? "#6d28d9" : "#15803d",
-                        border: `1px solid ${d.type==="percentage"?"#ddd6fe":"#bbf7d0"}`,
-                        borderRadius:999, padding:"3px 10px", fontSize:11, fontWeight:700,
-                      }}>
-                        {d.type==="percentage" ? "%" : "KD"} {d.type==="percentage" ? "Percent" : "Fixed"}
+                      <span
+                        style={{
+                          background:
+                            d.type === "percentage" ? "#ede9fe" : "#dcfce7",
+                          color:
+                            d.type === "percentage" ? "#6d28d9" : "#15803d",
+                          border: `1px solid ${d.type === "percentage" ? "#ddd6fe" : "#bbf7d0"}`,
+                          borderRadius: 999,
+                          padding: "3px 10px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {d.type === "percentage" ? "%" : "KD"}{" "}
+                        {d.type === "percentage" ? "Percent" : "Fixed"}
                       </span>
                     </td>
                     {/* Value */}
-                    <td style={{ color:t.accent, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:16 }}>
+                    <td
+                      style={{
+                        color: t.accent,
+                        fontFamily: "'Cormorant Garamond',serif",
+                        fontWeight: 800,
+                        fontSize: 16,
+                      }}
+                    >
                       {discountLabel(d)}
                     </td>
                     {/* Min Order */}
-                    <td style={{ color:t.subtle, fontSize:12 }}>
-                      {d.min_order ? `KD ${Number(d.min_order).toFixed(3)}` : "—"}
+                    <td style={{ color: t.subtle, fontSize: 12 }}>
+                      {d.min_order
+                        ? `KD ${Number(d.min_order).toFixed(3)}`
+                        : "—"}
                     </td>
                     {/* Max Order */}
-                    <td style={{ color:t.subtle, fontSize:12 }}>
-                      {d.max_order ? `KD ${Number(d.max_order).toFixed(3)}` : "—"}
+                    <td style={{ color: t.subtle, fontSize: 12 }}>
+                      {d.max_order
+                        ? `KD ${Number(d.max_order).toFixed(3)}`
+                        : "—"}
                     </td>
                     {/* Availability */}
-                    <td style={{ color:t.subtle, fontSize:12, whiteSpace:"nowrap" }}>
+                    <td
+                      style={{
+                        color: t.subtle,
+                        fontSize: 12,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {d.avail_from ? fmtDate(d.avail_from) : "Immediately"}
                     </td>
                     {/* Expiry */}
-                    <td style={{ fontSize:12, whiteSpace:"nowrap" }}>
+                    <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                       {d.expiry_date ? (
-                        <span style={{ color: isExpired(d) ? "#b91c1c" : t.text, fontWeight: isExpired(d) ? 700 : 400 }}>
-                          {isExpired(d) ? "⚠ " : ""}{fmtDate(d.expiry_date)}
+                        <span
+                          style={{
+                            color: isExpired(d) ? "#b91c1c" : t.text,
+                            fontWeight: isExpired(d) ? 700 : 400,
+                          }}
+                        >
+                          {isExpired(d) ? "⚠ " : ""}
+                          {fmtDate(d.expiry_date)}
                         </span>
-                      ) : <span style={{ color:t.muted }}>Never</span>}
+                      ) : (
+                        <span style={{ color: t.muted }}>Never</span>
+                      )}
                     </td>
                     {/* Status toggle */}
                     <td>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <label className="disc-toggle" title={isExpired(d) && !d.is_active ? "Edit expiry date first" : ""}>
-                          <input type="checkbox" checked={d.is_active} onChange={()=>toggleActive(d)} />
-                          <div className="disc-toggle-track" style={{ background: d.is_active ? t.accent : t.toggleOff }} />
-                          <div className="disc-toggle-thumb" style={{ transform: d.is_active ? "translateX(19px)" : "translateX(0)" }} />
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <label
+                          className="disc-toggle"
+                          title={
+                            isExpired(d) && !d.is_active
+                              ? "Edit expiry date first"
+                              : ""
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={d.is_active}
+                            onChange={() => toggleActive(d)}
+                          />
+                          <div
+                            className="disc-toggle-track"
+                            style={{
+                              background: d.is_active ? t.accent : t.toggleOff,
+                            }}
+                          />
+                          <div
+                            className="disc-toggle-thumb"
+                            style={{
+                              transform: d.is_active
+                                ? "translateX(19px)"
+                                : "translateX(0)",
+                            }}
+                          />
                         </label>
-                        <span style={{
-                          background:sm.bg, color:sm.color,
-                          border:`1px solid ${sm.border}`,
-                          borderRadius:999, padding:"2px 9px", fontSize:10, fontWeight:700, whiteSpace:"nowrap",
-                        }}>{sm.label}</span>
+                        <span
+                          style={{
+                            background: sm.bg,
+                            color: sm.color,
+                            border: `1px solid ${sm.border}`,
+                            borderRadius: 999,
+                            padding: "2px 9px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {sm.label}
+                        </span>
                       </div>
                     </td>
                     {/* Max uses per customer */}
-                    <td style={{ color:t.text, fontWeight:700, textAlign:"center" }}>
+                    <td
+                      style={{
+                        color: t.text,
+                        fontWeight: 700,
+                        textAlign: "center",
+                      }}
+                    >
                       {d.max_uses_per_customer}
                     </td>
                     {/* Redemptions */}
@@ -3663,42 +4597,72 @@ function DiscountsPage({ t, user }) {
                       <button
                         onClick={() => openRedemptions(d)}
                         style={{
-                          background:t.accentBg, border:`1px solid ${t.accentBorder}`,
-                          color:t.accent, borderRadius:8, padding:"5px 10px",
-                          fontSize:12, fontWeight:700, cursor:"pointer",
-                          fontFamily:"'Lato',sans-serif",
+                          background: t.accentBg,
+                          border: `1px solid ${t.accentBorder}`,
+                          color: t.accent,
+                          borderRadius: 8,
+                          padding: "5px 10px",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          fontFamily: "'Lato',sans-serif",
                         }}
                       >
                         {reds.length} uses
                       </button>
                     </td>
                     {/* Sales */}
-                    <td style={{ color:t.green, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:15 }}>
+                    <td
+                      style={{
+                        color: t.green,
+                        fontFamily: "'Cormorant Garamond',serif",
+                        fontWeight: 800,
+                        fontSize: 15,
+                      }}
+                    >
                       KD {totalSaved.toFixed(3)}
                     </td>
                     {/* Actions */}
                     <td>
-                      <div style={{ display:"flex", gap:6 }}>
+                      <div style={{ display: "flex", gap: 6 }}>
                         <button
                           onClick={() => openEdit(d)}
                           style={{
-                            background:t.surface2, border:`1px solid ${t.border2}`,
-                            borderRadius:8, width:30, height:30, cursor:"pointer",
-                            display:"flex", alignItems:"center", justifyContent:"center",
-                            color:t.subtle, fontSize:14,
+                            background: t.surface2,
+                            border: `1px solid ${t.border2}`,
+                            borderRadius: 8,
+                            width: 30,
+                            height: 30,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: t.subtle,
+                            fontSize: 14,
                           }}
                           title="Edit"
-                        >✏️</button>
+                        >
+                          ✏️
+                        </button>
                         <button
                           onClick={() => deleteDiscount(d)}
                           style={{
-                            background:"#fef2f2", border:"1px solid #fecaca",
-                            borderRadius:8, width:30, height:30, cursor:"pointer",
-                            display:"flex", alignItems:"center", justifyContent:"center",
-                            color:"#b91c1c", fontSize:14,
+                            background: "#fef2f2",
+                            border: "1px solid #fecaca",
+                            borderRadius: 8,
+                            width: 30,
+                            height: 30,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#b91c1c",
+                            fontSize: 14,
                           }}
                           title="Delete"
-                        >🗑</button>
+                        >
+                          🗑
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -3711,155 +4675,473 @@ function DiscountsPage({ t, user }) {
 
       {/* ── Create/Edit Modal ── */}
       {modalOpen && (
-        <div className="disc-modal-backdrop" onClick={e => { if(e.target===e.currentTarget) setModalOpen(false); }}>
-          <div className="disc-modal disc-modal-anim" style={{ background:t.surface, border:`1px solid ${t.border}` }}>
+        <div
+          className="disc-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setModalOpen(false);
+          }}
+        >
+          <div
+            className="disc-modal disc-modal-anim"
+            style={{ background: t.surface, border: `1px solid ${t.border}` }}
+          >
             {/* Header */}
-            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${t.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
-              <h2 style={{ fontFamily:"'Cormorant Garamond',serif", color:t.text, fontSize:22, fontWeight:800, margin:0 }}>
+            <div
+              style={{
+                padding: "20px 24px 16px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                style={{
+                  fontFamily: "'Cormorant Garamond',serif",
+                  color: t.text,
+                  fontSize: 22,
+                  fontWeight: 800,
+                  margin: 0,
+                }}
+              >
                 {editing ? "Edit Discount Code" : "New Discount Code"}
               </h2>
-              <button onClick={()=>setModalOpen(false)} style={{ background:t.surface2, border:`1px solid ${t.border2}`, borderRadius:"50%", width:32, height:32, cursor:"pointer", color:t.subtle, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              <button
+                onClick={() => setModalOpen(false)}
+                style={{
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                  color: t.subtle,
+                  fontSize: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
             </div>
 
             {/* Body */}
-            <div style={{ padding:"20px 24px", overflowY:"auto", flex:1 }}>
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
               {modalErr && (
-                <div style={{ background:"#fef2f2", border:"1px solid #fecaca", color:"#b91c1c", borderRadius:10, padding:"10px 14px", fontSize:13, marginBottom:16, fontWeight:500 }}>
+                <div
+                  style={{
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    color: "#b91c1c",
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    marginBottom: 16,
+                    fontWeight: 500,
+                  }}
+                >
                   ⚠️ {modalErr}
                 </div>
               )}
 
               {/* Code */}
-              <div style={{ marginBottom:16 }}>
-                <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Discount Code *</label>
+              <div style={{ marginBottom: 16 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: t.subtle,
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Discount Code *
+                </label>
                 <input
                   className="disc-inp"
                   placeholder="e.g. SAVE20 or WELCOME"
                   value={form.code}
-                  onChange={e => setF("code", e.target.value.toUpperCase())}
-                  style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, fontSize:16, letterSpacing:".06em" }}
+                  onChange={(e) => setF("code", e.target.value.toUpperCase())}
+                  style={{
+                    background: t.surface2,
+                    border: `1.5px solid ${t.border2}`,
+                    color: t.text,
+                    fontFamily: "'Cormorant Garamond',serif",
+                    fontWeight: 700,
+                    fontSize: 16,
+                    letterSpacing: ".06em",
+                  }}
                 />
               </div>
 
               {/* Type + Value side by side */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
                 <div>
-                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Discount Type *</label>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Discount Type *
+                  </label>
                   <select
                     className="disc-select"
                     value={form.type}
-                    onChange={e => setF("type", e.target.value)}
-                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                    onChange={(e) => setF("type", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
                   >
                     <option value="percentage">Percentage (%)</option>
                     <option value="fixed">Fixed Amount (KD)</option>
                   </select>
                 </div>
                 <div>
-                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>
-                    Value * {form.type==="percentage" ? "(e.g. 20 for 20%)" : "(e.g. 1.500 for KD 1.500)"}
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Value *{" "}
+                    {form.type === "percentage"
+                      ? "(e.g. 20 for 20%)"
+                      : "(e.g. 1.500 for KD 1.500)"}
                   </label>
                   <input
                     className="disc-inp"
-                    type="number" min="0" step={form.type==="percentage"?"1":"0.001"}
-                    placeholder={form.type==="percentage" ? "20" : "1.500"}
+                    type="number"
+                    min="0"
+                    step={form.type === "percentage" ? "1" : "0.001"}
+                    placeholder={form.type === "percentage" ? "20" : "1.500"}
                     value={form.value}
-                    onChange={e => setF("value", e.target.value)}
-                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                    onChange={(e) => setF("value", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
                   />
                 </div>
               </div>
 
               {/* Min / Max order */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
                 <div>
-                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
                     Min. Order (KD) *
                   </label>
                   <input
                     className="disc-inp"
-                    type="number" min="0" step="0.001"
+                    type="number"
+                    min="0"
+                    step="0.001"
                     placeholder="e.g. 3.000"
                     value={form.min_order}
-                    onChange={e => setF("min_order", e.target.value)}
-                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                    onChange={(e) => setF("min_order", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
                   />
                 </div>
                 <div>
-                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Max. Order (KD) <span style={{ textTransform:"none", fontWeight:400, color:t.muted }}>optional</span></label>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Max. Order (KD){" "}
+                    <span
+                      style={{
+                        textTransform: "none",
+                        fontWeight: 400,
+                        color: t.muted,
+                      }}
+                    >
+                      optional
+                    </span>
+                  </label>
                   <input
                     className="disc-inp"
-                    type="number" min="0" step="0.001"
+                    type="number"
+                    min="0"
+                    step="0.001"
                     placeholder="Leave blank for no max"
                     value={form.max_order}
-                    onChange={e => setF("max_order", e.target.value)}
-                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                    onChange={(e) => setF("max_order", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
                   />
                 </div>
               </div>
 
               {/* Avail from / Expiry */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
                 <div>
-                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Available From <span style={{ textTransform:"none", fontWeight:400, color:t.muted }}>optional</span></label>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Available From{" "}
+                    <span
+                      style={{
+                        textTransform: "none",
+                        fontWeight: 400,
+                        color: t.muted,
+                      }}
+                    >
+                      optional
+                    </span>
+                  </label>
                   <input
-                    className="disc-inp" type="date"
+                    className="disc-inp"
+                    type="date"
                     value={form.avail_from}
-                    onChange={e => setF("avail_from", e.target.value)}
-                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                    onChange={(e) => setF("avail_from", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
                   />
                 </div>
                 <div>
-                  <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Expiry Date <span style={{ textTransform:"none", fontWeight:400, color:t.muted }}>optional</span></label>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Expiry Date{" "}
+                    <span
+                      style={{
+                        textTransform: "none",
+                        fontWeight: 400,
+                        color: t.muted,
+                      }}
+                    >
+                      optional
+                    </span>
+                  </label>
                   <input
-                    className="disc-inp" type="date"
+                    className="disc-inp"
+                    type="date"
                     value={form.expiry_date}
-                    onChange={e => setF("expiry_date", e.target.value)}
-                    style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text }}
+                    onChange={(e) => setF("expiry_date", e.target.value)}
+                    style={{
+                      background: t.surface2,
+                      border: `1.5px solid ${t.border2}`,
+                      color: t.text,
+                    }}
                   />
                 </div>
               </div>
 
               {/* Max uses per customer */}
-              <div style={{ marginBottom:16 }}>
-                <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.subtle, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Max Uses Per Customer *</label>
+              <div style={{ marginBottom: 16 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: t.subtle,
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Max Uses Per Customer *
+                </label>
                 <input
-                  className="disc-inp" type="number" min="1" step="1"
+                  className="disc-inp"
+                  type="number"
+                  min="1"
+                  step="1"
                   placeholder="1"
                   value={form.max_uses_per_customer}
-                  onChange={e => setF("max_uses_per_customer", e.target.value)}
-                  style={{ background:t.surface2, border:`1.5px solid ${t.border2}`, color:t.text, maxWidth:120 }}
+                  onChange={(e) =>
+                    setF("max_uses_per_customer", e.target.value)
+                  }
+                  style={{
+                    background: t.surface2,
+                    border: `1.5px solid ${t.border2}`,
+                    color: t.text,
+                    maxWidth: 120,
+                  }}
                 />
-                <p style={{ color:t.muted, fontSize:11, marginTop:5 }}>
-                  Each customer can use this code this many times. Set to 1 for single-use per customer.
+                <p style={{ color: t.muted, fontSize: 11, marginTop: 5 }}>
+                  Each customer can use this code this many times. Set to 1 for
+                  single-use per customer.
                 </p>
               </div>
 
               {/* Active toggle */}
-              <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", background:t.surface2, borderRadius:12, border:`1px solid ${t.border}` }}>
-                <div style={{ flex:1 }}>
-                  <p style={{ color:t.text, fontWeight:700, fontSize:13, margin:0 }}>Active</p>
-                  <p style={{ color:t.muted, fontSize:11, margin:"3px 0 0" }}>Customers can use this code when active.</p>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "14px 16px",
+                  background: t.surface2,
+                  borderRadius: 12,
+                  border: `1px solid ${t.border}`,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <p
+                    style={{
+                      color: t.text,
+                      fontWeight: 700,
+                      fontSize: 13,
+                      margin: 0,
+                    }}
+                  >
+                    Active
+                  </p>
+                  <p
+                    style={{ color: t.muted, fontSize: 11, margin: "3px 0 0" }}
+                  >
+                    Customers can use this code when active.
+                  </p>
                 </div>
                 <label className="disc-toggle">
-                  <input type="checkbox" checked={form.is_active} onChange={e => setF("is_active", e.target.checked)} />
-                  <div className="disc-toggle-track" style={{ background: form.is_active ? t.accent : t.toggleOff }} />
-                  <div className="disc-toggle-thumb" style={{ transform: form.is_active ? "translateX(19px)" : "translateX(0)" }} />
+                  <input
+                    type="checkbox"
+                    checked={form.is_active}
+                    onChange={(e) => setF("is_active", e.target.checked)}
+                  />
+                  <div
+                    className="disc-toggle-track"
+                    style={{
+                      background: form.is_active ? t.accent : t.toggleOff,
+                    }}
+                  />
+                  <div
+                    className="disc-toggle-thumb"
+                    style={{
+                      transform: form.is_active
+                        ? "translateX(19px)"
+                        : "translateX(0)",
+                    }}
+                  />
                 </label>
               </div>
             </div>
 
             {/* Footer */}
-            <div style={{ padding:"16px 24px", borderTop:`1px solid ${t.border}`, display:"flex", gap:10, flexShrink:0 }}>
+            <div
+              style={{
+                padding: "16px 24px",
+                borderTop: `1px solid ${t.border}`,
+                display: "flex",
+                gap: 10,
+                flexShrink: 0,
+              }}
+            >
               <button
-                onClick={()=>setModalOpen(false)}
-                style={{ flex:1, background:t.surface2, border:`1px solid ${t.border2}`, borderRadius:12, padding:"12px", fontSize:14, fontWeight:700, color:t.subtle, cursor:"pointer", fontFamily:"'Lato',sans-serif" }}
+                onClick={() => setModalOpen(false)}
+                style={{
+                  flex: 1,
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: 12,
+                  padding: "12px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: t.subtle,
+                  cursor: "pointer",
+                  fontFamily: "'Lato',sans-serif",
+                }}
               >
                 Cancel
               </button>
               <button
-                onClick={save} disabled={saving}
-                style={{ flex:2, background:t.accent, border:"none", borderRadius:12, padding:"12px", fontSize:14, fontWeight:700, color:"#fff", cursor:saving?"not-allowed":"pointer", opacity:saving?.7:1, fontFamily:"'Lato',sans-serif" }}
+                onClick={save}
+                disabled={saving}
+                style={{
+                  flex: 2,
+                  background: t.accent,
+                  border: "none",
+                  borderRadius: 12,
+                  padding: "12px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#fff",
+                  cursor: saving ? "not-allowed" : "pointer",
+                  opacity: saving ? 0.7 : 1,
+                  fontFamily: "'Lato',sans-serif",
+                }}
               >
                 {saving ? "Saving…" : editing ? "Save Changes" : "Create Code"}
               </button>
@@ -3870,63 +5152,210 @@ function DiscountsPage({ t, user }) {
 
       {/* ── Redemptions Drawer ── */}
       {redeemDisc && (
-        <div className="disc-modal-backdrop" onClick={e => { if(e.target===e.currentTarget) setRedeemDisc(null); }}>
-          <div className="disc-modal disc-modal-anim" style={{ background:t.surface, border:`1px solid ${t.border}` }}>
-            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${t.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+        <div
+          className="disc-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRedeemDisc(null);
+          }}
+        >
+          <div
+            className="disc-modal disc-modal-anim"
+            style={{ background: t.surface, border: `1px solid ${t.border}` }}
+          >
+            <div
+              style={{
+                padding: "20px 24px 16px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+              }}
+            >
               <div>
-                <h2 style={{ fontFamily:"'Cormorant Garamond',serif", color:t.text, fontSize:20, fontWeight:800, margin:"0 0 2px" }}>
-                  Redemptions — <span style={{ color:t.accent }}>{redeemDisc.code}</span>
+                <h2
+                  style={{
+                    fontFamily: "'Cormorant Garamond',serif",
+                    color: t.text,
+                    fontSize: 20,
+                    fontWeight: 800,
+                    margin: "0 0 2px",
+                  }}
+                >
+                  Redemptions —{" "}
+                  <span style={{ color: t.accent }}>{redeemDisc.code}</span>
                 </h2>
-                <p style={{ color:t.muted, fontSize:12, margin:0 }}>
-                  {discountLabel(redeemDisc)} · max {redeemDisc.max_uses_per_customer} use{redeemDisc.max_uses_per_customer!==1?"s":""}/customer
+                <p style={{ color: t.muted, fontSize: 12, margin: 0 }}>
+                  {discountLabel(redeemDisc)} · max{" "}
+                  {redeemDisc.max_uses_per_customer} use
+                  {redeemDisc.max_uses_per_customer !== 1 ? "s" : ""}/customer
                 </p>
               </div>
-              <button onClick={()=>setRedeemDisc(null)} style={{ background:t.surface2, border:`1px solid ${t.border2}`, borderRadius:"50%", width:32, height:32, cursor:"pointer", color:t.subtle, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              <button
+                onClick={() => setRedeemDisc(null)}
+                style={{
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                  color: t.subtle,
+                  fontSize: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
             </div>
-            <div style={{ padding:"16px 24px", overflowY:"auto", flex:1 }}>
+            <div style={{ padding: "16px 24px", overflowY: "auto", flex: 1 }}>
               {redeemLoading ? (
-                <div style={{ textAlign:"center", padding:"32px 0", color:t.muted }}>Loading…</div>
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "32px 0",
+                    color: t.muted,
+                  }}
+                >
+                  Loading…
+                </div>
               ) : redemptions.length === 0 ? (
-                <div style={{ textAlign:"center", padding:"40px 0" }}>
-                  <div style={{ fontSize:40, opacity:.2, marginBottom:10 }}>🔄</div>
-                  <p style={{ color:t.muted, fontSize:14 }}>No redemptions yet for this code.</p>
+                <div style={{ textAlign: "center", padding: "40px 0" }}>
+                  <div style={{ fontSize: 40, opacity: 0.2, marginBottom: 10 }}>
+                    🔄
+                  </div>
+                  <p style={{ color: t.muted, fontSize: 14 }}>
+                    No redemptions yet for this code.
+                  </p>
                 </div>
               ) : (
                 <>
-                  <div style={{ display:"flex", gap:12, marginBottom:18, flexWrap:"wrap" }}>
-                    <div style={{ background:t.accentBg, border:`1px solid ${t.accentBorder}`, borderRadius:10, padding:"10px 16px" }}>
-                      <div style={{ color:t.accent, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:20 }}>{redemptions.length}</div>
-                      <div style={{ color:t.muted, fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Total Uses</div>
-                    </div>
-                    <div style={{ background:t.greenBg, border:`1px solid ${t.greenBorder}`, borderRadius:10, padding:"10px 16px" }}>
-                      <div style={{ color:t.green, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:20 }}>
-                        KD {redemptions.reduce((s,r)=>s+Number(r.amount_saved||0),0).toFixed(3)}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      marginBottom: 18,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: t.accentBg,
+                        border: `1px solid ${t.accentBorder}`,
+                        borderRadius: 10,
+                        padding: "10px 16px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: t.accent,
+                          fontFamily: "'Cormorant Garamond',serif",
+                          fontWeight: 800,
+                          fontSize: 20,
+                        }}
+                      >
+                        {redemptions.length}
                       </div>
-                      <div style={{ color:t.muted, fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Total Saved</div>
+                      <div
+                        style={{
+                          color: t.muted,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Total Uses
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        background: t.greenBg,
+                        border: `1px solid ${t.greenBorder}`,
+                        borderRadius: 10,
+                        padding: "10px 16px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: t.green,
+                          fontFamily: "'Cormorant Garamond',serif",
+                          fontWeight: 800,
+                          fontSize: 20,
+                        }}
+                      >
+                        KD{" "}
+                        {redemptions
+                          .reduce((s, r) => s + Number(r.amount_saved || 0), 0)
+                          .toFixed(3)}
+                      </div>
+                      <div
+                        style={{
+                          color: t.muted,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Total Saved
+                      </div>
                     </div>
                   </div>
                   {redemptions.map((r, i) => (
-                    <div key={r.id} className="disc-redemption-row" style={{ borderBottomColor:t.border }}>
-                      <div style={{
-                        width:36, height:36, borderRadius:"50%", flexShrink:0,
-                        background:t.accentBg, border:`1px solid ${t.accentBorder}`,
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        color:t.accent, fontWeight:800, fontSize:13,
-                        fontFamily:"'Cormorant Garamond',serif",
-                      }}>
-                        {((r.Customer?.cust_name || "?")[0]).toUpperCase()}
+                    <div
+                      key={r.id}
+                      className="disc-redemption-row"
+                      style={{ borderBottomColor: t.border }}
+                    >
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          background: t.accentBg,
+                          border: `1px solid ${t.accentBorder}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: t.accent,
+                          fontWeight: 800,
+                          fontSize: 13,
+                          fontFamily: "'Cormorant Garamond',serif",
+                        }}
+                      >
+                        {(r.Customer?.cust_name || "?")[0].toUpperCase()}
                       </div>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <p style={{ color:t.text, fontWeight:700, fontSize:13, margin:"0 0 2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p
+                          style={{
+                            color: t.text,
+                            fontWeight: 700,
+                            fontSize: 13,
+                            margin: "0 0 2px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
                           {r.Customer?.cust_name || "Unknown Customer"}
                         </p>
-                        <p style={{ color:t.muted, fontSize:11, margin:0 }}>
-                          {r.Customer?.ph_num || ""} · Order #{r.order_id || "—"} · {fmtDate(r.created_at)}
+                        <p style={{ color: t.muted, fontSize: 11, margin: 0 }}>
+                          {r.Customer?.ph_num || ""} · Order #
+                          {r.order_id || "—"} · {fmtDate(r.created_at)}
                         </p>
                       </div>
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ color:t.green, fontFamily:"'Cormorant Garamond',serif", fontWeight:800, fontSize:15 }}>
-                          −KD {Number(r.amount_saved||0).toFixed(3)}
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div
+                          style={{
+                            color: t.green,
+                            fontFamily: "'Cormorant Garamond',serif",
+                            fontWeight: 800,
+                            fontSize: 15,
+                          }}
+                        >
+                          −KD {Number(r.amount_saved || 0).toFixed(3)}
                         </div>
                       </div>
                     </div>
@@ -3935,6 +5364,3002 @@ function DiscountsPage({ t, user }) {
               )}
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Broadcast Page ────────────────────────────────────────────────────────────
+const TAG_PALETTE = [
+  "#6366F1",
+  "#C4711A",
+  "#2D7A4F",
+  "#EC4899",
+  "#14B8A6",
+  "#F59E0B",
+  "#3B82F6",
+  "#8B5CF6",
+  "#EF4444",
+  "#10B981",
+];
+
+// Special audience definitions — computed from Orders/Customer data
+const SPECIAL_AUDIENCES = [
+  {
+    id: "active",
+    name: "Active Customers",
+    icon: "⚡",
+    desc: "Ordered in last 30 days",
+    color: "#2D7A4F",
+  },
+  {
+    id: "vip",
+    name: "VIP Customers",
+    icon: "👑",
+    desc: "Top 20% by lifetime spend",
+    color: "#F59E0B",
+  },
+  {
+    id: "new",
+    name: "New Customers",
+    icon: "🌟",
+    desc: "Joined & linked in last 30 days",
+    color: "#6366F1",
+  },
+  {
+    id: "inactive",
+    name: "Inactive Customers",
+    icon: "💤",
+    desc: "No orders in 90+ days",
+    color: "#9CA3AF",
+  },
+  {
+    id: "opencart",
+    name: "Open Cart Customers",
+    icon: "🛒",
+    desc: "Linked but no order in last 7 days",
+    color: "#EC4899",
+  },
+  {
+    id: "potential",
+    name: "Potential Customers",
+    icon: "🎯",
+    desc: "Linked to restaurant, never ordered",
+    color: "#14B8A6",
+  },
+  {
+    id: "highavg",
+    name: "High Avg Spend",
+    icon: "💎",
+    desc: "Avg order value > 2× restaurant avg",
+    color: "#8B5CF6",
+  },
+  {
+    id: "repeatbuyers",
+    name: "Repeat Buyers",
+    icon: "🔄",
+    desc: "5 or more accepted orders placed",
+    color: "#3B82F6",
+  },
+];
+
+function BroadcastPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  const [activeTab, setActiveTab] = useState("audiences");
+
+  return (
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {/* Page header + tab bar */}
+      <div style={{ padding: "24px 24px 0", flexShrink: 0 }}>
+        <h1
+          style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            color: t.text,
+            fontSize: "clamp(26px,5vw,36px)",
+            fontWeight: 800,
+            margin: "0 0 20px",
+          }}
+        >
+          Broadcast
+        </h1>
+        <div
+          style={{
+            display: "flex",
+            gap: 0,
+            borderBottom: `1.5px solid ${t.border}`,
+          }}
+        >
+          {[
+            ["schedule", "Schedule Broadcast"],
+            ["audiences", "Audiences"],
+            ["members", "Audience Members"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              style={{
+                padding: "10px 20px",
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 14,
+                fontWeight: 600,
+                color: activeTab === id ? t.text : t.muted,
+                borderTop: "none",
+                borderLeft: "none",
+                borderRight: "none",
+                borderBottom:
+                  activeTab === id
+                    ? `2.5px solid ${t.text}`
+                    : "2.5px solid transparent",
+                background: "none",
+                outline: "none",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                marginBottom: -1.5,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div style={{ flex: 1, overflow: "auto" }}>
+        {activeTab === "schedule" && (
+          <ScheduleBroadcastTab t={t} restId={restId} />
+        )}
+        {activeTab === "audiences" && <AudiencesTab t={t} restId={restId} />}
+        {activeTab === "members" && (
+          <AudienceMembersTab t={t} restId={restId} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── SCHEDULE BROADCAST TAB ───────────────────────────────────────────────────
+function ScheduleBroadcastTab({ t, restId }) {
+  const [tags, setTags] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [selectedAudiences, setSelectedAudiences] = useState([]);
+  const [template, setTemplate] = useState({
+    name: "",
+    headerType: "text",
+    headerText: "",
+    headerImageUrl: "",
+    body: "",
+    footer: "Not interested? Type STOP to no longer receive updates.",
+    buttons: [""],
+    includeDiscount: false,
+    discountCode: "",
+  });
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleSuccess, setScheduleSuccess] = useState("");
+  const [scheduleErr, setScheduleErr] = useState("");
+  const [savedTemplates, setSavedTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [showCreateTemplate, setShowCreateTemplate] = useState(false);
+
+  useEffect(() => {
+    if (!restId) return;
+    (async () => {
+      const [{ data: tData }, { data: tmpl }] = await Promise.all([
+        supabase
+          .from("Tags")
+          .select("id,name,color")
+          .eq("rest_id", restId)
+          .order("name"),
+        supabase
+          .from("Broadcast_Templates")
+          .select("*")
+          .eq("rest_id", restId)
+          .order("created_at", { ascending: false }),
+      ]);
+      setTags(tData || []);
+      setSavedTemplates(tmpl || []);
+      setTagsLoading(false);
+      setTemplatesLoading(false);
+    })();
+  }, [restId]);
+
+  const allAudiences = [
+    ...SPECIAL_AUDIENCES.map((s) => ({
+      id: `special_${s.id}`,
+      name: s.name,
+      icon: s.icon,
+      color: s.color,
+      special: true,
+    })),
+    ...(tags || []).map((tg) => ({
+      id: `tag_${tg.id}`,
+      name: tg.name,
+      icon: "🏷️",
+      color: tg.color,
+      special: false,
+      tag_id: tg.id,
+    })),
+  ];
+
+  const toggleAudience = (id) =>
+    setSelectedAudiences((p) =>
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+    );
+
+  const saveTemplate = async () => {
+    if (!template.name.trim()) {
+      setScheduleErr("Template name is required.");
+      return;
+    }
+    if (!template.body.trim()) {
+      setScheduleErr("Message body is required.");
+      return;
+    }
+    setScheduling(true);
+    setScheduleErr("");
+    try {
+      const { error } = await supabase.from("Broadcast_Templates").insert({
+        rest_id: restId,
+        name: template.name.trim().toLowerCase().replace(/\s+/g, "_"),
+        header_type: template.headerType,
+        header_text: template.headerText || null,
+        header_image_url: template.headerImageUrl || null,
+        body: template.body,
+        footer: template.footer,
+        buttons: template.buttons.filter(Boolean),
+        include_discount: template.includeDiscount,
+        discount_code: template.discountCode || null,
+      });
+      if (error) throw error;
+      setScheduleSuccess(
+        "Template saved! To send via WhatsApp Business API, submit this template for approval in your WhatsApp Business Manager.",
+      );
+      setShowCreateTemplate(false);
+      setTemplate({
+        name: "",
+        headerType: "text",
+        headerText: "",
+        headerImageUrl: "",
+        body: "",
+        footer: "Not interested? Type STOP to no longer receive updates.",
+        buttons: [""],
+        includeDiscount: false,
+        discountCode: "",
+      });
+      const { data } = await supabase
+        .from("Broadcast_Templates")
+        .select("*")
+        .eq("rest_id", restId)
+        .order("created_at", { ascending: false });
+      setSavedTemplates(data || []);
+    } catch (e) {
+      setScheduleErr(e.message || "Failed to save template.");
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const FieldLabel = ({ children, sub }) => (
+    <div style={{ marginBottom: 6 }}>
+      <label
+        style={{
+          color: t.subtle,
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          display: "block",
+        }}
+      >
+        {children}
+      </label>
+      {sub && (
+        <p
+          style={{
+            color: t.muted,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 11,
+            marginTop: 2,
+          }}
+        >
+          {sub}
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px 24px 40px", maxWidth: 1000 }}>
+      {scheduleSuccess && (
+        <div
+          style={{
+            background: "#f0fdf4",
+            border: "1px solid #B8DEC9",
+            color: "#2D7A4F",
+            padding: "12px 16px",
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 13,
+          }}
+        >
+          ✅ {scheduleSuccess}
+        </div>
+      )}
+      {scheduleErr && (
+        <div
+          style={{
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#B83232",
+            padding: "12px 16px",
+            borderRadius: 10,
+            marginBottom: 16,
+            fontSize: 13,
+          }}
+        >
+          ⚠️ {scheduleErr}
+        </div>
+      )}
+
+      {/* Saved templates grid */}
+      <div style={{ marginBottom: 28 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              color: t.text,
+              fontSize: 20,
+              fontWeight: 700,
+              margin: 0,
+            }}
+          >
+            Message Templates
+          </p>
+          <button
+            onClick={() => setShowCreateTemplate(true)}
+            style={{
+              background: t.text,
+              color: t.surface,
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              fontSize: 13,
+              padding: "10px 18px",
+              borderRadius: 10,
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            + Create Template
+          </button>
+        </div>
+
+        {templatesLoading ? (
+          <p style={{ color: t.muted, fontSize: 13 }}>Loading templates…</p>
+        ) : savedTemplates.length === 0 ? (
+          <div
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 14,
+              padding: "32px 20px",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 42, marginBottom: 10, opacity: 0.2 }}>
+              📨
+            </div>
+            <p
+              style={{
+                color: t.muted,
+                fontSize: 14,
+                fontFamily: "'Lato', sans-serif",
+              }}
+            >
+              No templates yet. Create one to get started.
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {savedTemplates.map((tmpl) => (
+              <div
+                key={tmpl.id}
+                style={{
+                  background: t.surface,
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                {/* Template card header */}
+                <div
+                  style={{
+                    padding: "14px 16px 10px",
+                    borderBottom: `1px solid ${t.border}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontFamily: "'Lato', sans-serif",
+                        color: t.text,
+                        fontWeight: 700,
+                        fontSize: 14,
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {tmpl.name}
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        flexShrink: 0,
+                        marginLeft: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          background: t.greenBg,
+                          color: t.green,
+                          border: `1px solid ${t.greenBorder}`,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          fontFamily: "'Lato',sans-serif",
+                        }}
+                      >
+                        Saved
+                      </span>
+                      <span
+                        style={{
+                          background: t.surface2,
+                          color: t.muted,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          fontFamily: "'Lato',sans-serif",
+                        }}
+                      >
+                        {tmpl.header_type || "TEXT"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {/* Preview */}
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    flex: 1,
+                    background: "#FAFAF8",
+                    maxHeight: 150,
+                    overflow: "hidden",
+                  }}
+                >
+                  {tmpl.header_text && (
+                    <p
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: t.text,
+                        marginBottom: 4,
+                        fontFamily: "Arial, sans-serif",
+                      }}
+                    >
+                      {tmpl.header_text}
+                    </p>
+                  )}
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "#444",
+                      lineHeight: 1.5,
+                      fontFamily: "Arial, sans-serif",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {tmpl.body}
+                  </p>
+                </div>
+                {/* Meta */}
+                <div
+                  style={{
+                    padding: "8px 16px",
+                    borderTop: `1px solid ${t.border}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 3,
+                  }}
+                >
+                  {[
+                    ["Header:", tmpl.header_type?.toUpperCase() || "—"],
+                    [
+                      "Body:",
+                      (tmpl.body || "").slice(0, 50) +
+                        ((tmpl.body || "").length > 50 ? "…" : ""),
+                    ],
+                    [
+                      "Footer:",
+                      (tmpl.footer || "—").slice(0, 40) +
+                        ((tmpl.footer || "").length > 40 ? "…" : ""),
+                    ],
+                    ["Buttons:", (tmpl.buttons || []).length + " button(s)"],
+                  ].map(([label, val]) => (
+                    <div
+                      key={label}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: t.text,
+                          fontFamily: "'Lato',sans-serif",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                          minWidth: 50,
+                        }}
+                      >
+                        {label}
+                      </span>
+                      <span
+                        style={{
+                          color: t.muted,
+                          fontFamily: "'Lato',sans-serif",
+                          fontSize: 11,
+                        }}
+                      >
+                        {val}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {/* Send button */}
+                <button
+                  onClick={() => {
+                    if (selectedAudiences.length === 0) {
+                      setScheduleErr(
+                        "Select at least one audience tag below to send to.",
+                      );
+                      return;
+                    }
+                    setScheduleSuccess(
+                      `"${tmpl.name}" queued for ${selectedAudiences.length} audience(s). Send via WhatsApp Business API.`,
+                    );
+                  }}
+                  style={{
+                    background: t.text,
+                    color: t.surface,
+                    fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: "13px 0",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                >
+                  📤 Send Broadcast
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Audience selector */}
+      <div
+        style={{
+          background: t.surface,
+          border: `1px solid ${t.border}`,
+          borderRadius: 14,
+          padding: 20,
+          marginBottom: 20,
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            color: t.text,
+            fontSize: 18,
+            fontWeight: 700,
+            marginBottom: 12,
+          }}
+        >
+          Select Audiences to Broadcast to
+          {selectedAudiences.length > 0 && (
+            <span
+              style={{
+                color: t.accent,
+                fontFamily: "'Lato',sans-serif",
+                fontSize: 13,
+                fontWeight: 600,
+                marginLeft: 10,
+              }}
+            >
+              {selectedAudiences.length} selected
+            </span>
+          )}
+        </p>
+        {tagsLoading ? (
+          <p style={{ color: t.muted, fontSize: 13 }}>Loading…</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {allAudiences.map((aud) => {
+              const sel = selectedAudiences.includes(aud.id);
+              return (
+                <button
+                  key={aud.id}
+                  onClick={() => toggleAudience(aud.id)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "7px 14px",
+                    borderRadius: 99,
+                    border: `1.5px solid ${sel ? aud.color : t.border2}`,
+                    background: sel ? aud.color + "18" : t.surface2,
+                    color: sel ? aud.color : t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all .15s",
+                  }}
+                >
+                  <span>{aud.icon}</span>
+                  {aud.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Create Template Modal */}
+      {showCreateTemplate && (
+        <>
+          <div
+            onClick={() => setShowCreateTemplate(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.5)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              inset: "16px",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 16,
+              overflow: "auto",
+              maxWidth: 680,
+              margin: "auto",
+              height: "fit-content",
+              maxHeight: "calc(100dvh - 32px)",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div
+              style={{
+                padding: "24px 28px",
+                borderBottom: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <p
+                style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  color: t.text,
+                  fontSize: 22,
+                  fontWeight: 800,
+                  margin: 0,
+                }}
+              >
+                Create Template
+              </p>
+              <button
+                onClick={() => setShowCreateTemplate(false)}
+                style={{
+                  background: t.surface2,
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                  fontSize: 18,
+                  color: t.subtle,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div
+              style={{
+                padding: "24px 28px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 20,
+              }}
+            >
+              {/* Template Details */}
+              <div
+                style={{
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 12,
+                  padding: 20,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: t.text,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    marginBottom: 16,
+                    borderBottom: `1px solid ${t.border}`,
+                    paddingBottom: 10,
+                  }}
+                >
+                  Template Details
+                </p>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 16,
+                  }}
+                >
+                  <div>
+                    <FieldLabel sub="Only lowercase letters, numbers and underscores. Spaces → underscores.">
+                      Template Name
+                    </FieldLabel>
+                    <input
+                      value={template.name}
+                      onChange={(e) =>
+                        setTemplate((p) => ({
+                          ...p,
+                          name: e.target.value
+                            .toLowerCase()
+                            .replace(/[^a-z0-9_\s]/g, "")
+                            .replace(/\s/g, "_"),
+                        }))
+                      }
+                      placeholder="e.g. discount_offer"
+                      maxLength={50}
+                      style={{
+                        width: "100%",
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Language</FieldLabel>
+                    <select
+                      style={{
+                        width: "100%",
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        fontSize: 13,
+                      }}
+                    >
+                      <option>English</option>
+                      <option>Arabic</option>
+                      <option>Hindi</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <FieldLabel>Header Type</FieldLabel>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {["text", "image", "pdf", "none"].map((ht) => (
+                      <label
+                        key={ht}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          cursor: "pointer",
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 13,
+                          color: t.text,
+                          border: `1.5px solid ${template.headerType === ht ? t.accent : t.border2}`,
+                          padding: "8px 14px",
+                          borderRadius: 8,
+                          background:
+                            template.headerType === ht
+                              ? t.accentBg
+                              : t.surface2,
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          checked={template.headerType === ht}
+                          onChange={() =>
+                            setTemplate((p) => ({ ...p, headerType: ht }))
+                          }
+                          style={{ accentColor: t.accent }}
+                        />
+                        {ht.charAt(0).toUpperCase() + ht.slice(1)}
+                        {ht === "text" ? " Only" : ""}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Header Content */}
+              {(template.headerType === "text" ||
+                template.headerType === "image") && (
+                <div
+                  style={{
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 12,
+                    padding: 20,
+                  }}
+                >
+                  <p
+                    style={{
+                      fontFamily: "'Cormorant Garamond', serif",
+                      color: t.text,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      marginBottom: 14,
+                      borderBottom: `1px solid ${t.border}`,
+                      paddingBottom: 10,
+                    }}
+                  >
+                    Header Content
+                  </p>
+                  {template.headerType === "text" ? (
+                    <div>
+                      <FieldLabel>Header Text</FieldLabel>
+                      <input
+                        value={template.headerText}
+                        onChange={(e) =>
+                          setTemplate((p) => ({
+                            ...p,
+                            headerText: e.target.value,
+                          }))
+                        }
+                        placeholder="Enter Header Text"
+                        maxLength={60}
+                        style={{
+                          width: "100%",
+                          background: t.surface2,
+                          border: `1px solid ${t.border2}`,
+                          color: t.text,
+                          fontFamily: "'Lato', sans-serif",
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <button
+                        onClick={() =>
+                          setTemplate((p) => ({
+                            ...p,
+                            headerText: p.headerText + "{{1}}",
+                          }))
+                        }
+                        style={{
+                          marginTop: 8,
+                          background: t.surface2,
+                          border: `1px solid ${t.border2}`,
+                          color: t.subtle,
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 11,
+                          padding: "5px 12px",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                        }}
+                      >
+                        + Add Variable
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <FieldLabel>Image URL</FieldLabel>
+                      <input
+                        value={template.headerImageUrl}
+                        onChange={(e) =>
+                          setTemplate((p) => ({
+                            ...p,
+                            headerImageUrl: e.target.value,
+                          }))
+                        }
+                        placeholder="https://…"
+                        style={{
+                          width: "100%",
+                          background: t.surface2,
+                          border: `1px solid ${t.border2}`,
+                          color: t.text,
+                          fontFamily: "'Lato', sans-serif",
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Message Body */}
+              <div
+                style={{
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 12,
+                  padding: 20,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: t.text,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    marginBottom: 14,
+                    borderBottom: `1px solid ${t.border}`,
+                    paddingBottom: 10,
+                  }}
+                >
+                  Message Body
+                </p>
+                <FieldLabel sub="Use {{1}}, {{2}} etc. as variable placeholders">
+                  Message Body
+                </FieldLabel>
+                <textarea
+                  value={template.body}
+                  onChange={(e) =>
+                    setTemplate((p) => ({ ...p, body: e.target.value }))
+                  }
+                  rows={5}
+                  placeholder="Enter your message body…"
+                  maxLength={1024}
+                  style={{
+                    width: "100%",
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.text,
+                    fontFamily: "Arial, sans-serif",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    resize: "vertical",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {["Add Variable", "Bold", "Italic"].map((btn) => (
+                    <button
+                      key={btn}
+                      onClick={() => {
+                        if (btn === "Add Variable")
+                          setTemplate((p) => ({
+                            ...p,
+                            body:
+                              p.body +
+                              " {{" +
+                              ((p.body.match(/{{(\d+)}}/g) || []).length + 1 ||
+                                1) +
+                              "}}",
+                          }));
+                        if (btn === "Bold")
+                          setTemplate((p) => ({
+                            ...p,
+                            body: p.body + " *text*",
+                          }));
+                        if (btn === "Italic")
+                          setTemplate((p) => ({
+                            ...p,
+                            body: p.body + " _text_",
+                          }));
+                      }}
+                      style={{
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.subtle,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 11,
+                        padding: "5px 12px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      + {btn}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ color: t.muted, fontSize: 11, marginTop: 6 }}>
+                  {template.body.length}/1024 characters
+                </p>
+              </div>
+
+              {/* Footer + Buttons */}
+              <div
+                style={{
+                  border: `1px solid ${t.border}`,
+                  borderRadius: 12,
+                  padding: 20,
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    color: t.text,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    marginBottom: 14,
+                    borderBottom: `1px solid ${t.border}`,
+                    paddingBottom: 10,
+                  }}
+                >
+                  Footer & Buttons
+                </p>
+                <FieldLabel>Footer Text (optional)</FieldLabel>
+                <input
+                  value={template.footer}
+                  onChange={(e) =>
+                    setTemplate((p) => ({ ...p, footer: e.target.value }))
+                  }
+                  style={{
+                    width: "100%",
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.text,
+                    fontFamily: "'Lato', sans-serif",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                    marginBottom: 14,
+                  }}
+                />
+                <FieldLabel>Call-to-Action Buttons (max 3)</FieldLabel>
+                {template.buttons.map((btn, bi) => (
+                  <div
+                    key={bi}
+                    style={{ display: "flex", gap: 8, marginBottom: 6 }}
+                  >
+                    <input
+                      value={btn}
+                      onChange={(e) =>
+                        setTemplate((p) => ({
+                          ...p,
+                          buttons: p.buttons.map((b, i) =>
+                            i === bi ? e.target.value : b,
+                          ),
+                        }))
+                      }
+                      placeholder={`Button ${bi + 1} text`}
+                      maxLength={25}
+                      style={{
+                        flex: 1,
+                        background: t.surface2,
+                        border: `1px solid ${t.border2}`,
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        fontSize: 13,
+                      }}
+                    />
+                    <button
+                      onClick={() =>
+                        setTemplate((p) => ({
+                          ...p,
+                          buttons: p.buttons.filter((_, i) => i !== bi),
+                        }))
+                      }
+                      style={{
+                        background: "#FEF2F2",
+                        border: "1px solid #FECACA",
+                        color: "#B83232",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {template.buttons.length < 3 && (
+                  <button
+                    onClick={() =>
+                      setTemplate((p) => ({
+                        ...p,
+                        buttons: [...p.buttons, ""],
+                      }))
+                    }
+                    style={{
+                      background: t.surface2,
+                      border: `1px solid ${t.border2}`,
+                      color: t.subtle,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 12,
+                      padding: "7px 14px",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      marginTop: 4,
+                    }}
+                  >
+                    + Add Button
+                  </button>
+                )}
+                {/* Discount code toggle */}
+                <div
+                  style={{
+                    marginTop: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    id="incDisc"
+                    checked={template.includeDiscount}
+                    onChange={(e) =>
+                      setTemplate((p) => ({
+                        ...p,
+                        includeDiscount: e.target.checked,
+                      }))
+                    }
+                    style={{ accentColor: t.accent, width: 16, height: 16 }}
+                  />
+                  <label
+                    htmlFor="incDisc"
+                    style={{
+                      color: t.text,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Include discount code in message
+                  </label>
+                </div>
+                {template.includeDiscount && (
+                  <input
+                    value={template.discountCode}
+                    onChange={(e) =>
+                      setTemplate((p) => ({
+                        ...p,
+                        discountCode: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. WOMEN20"
+                    style={{
+                      marginTop: 8,
+                      background: t.surface2,
+                      border: `1px solid ${t.border2}`,
+                      color: t.text,
+                      fontFamily: "'Courier New', monospace",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      letterSpacing: ".06em",
+                    }}
+                  />
+                )}
+              </div>
+
+              {scheduleErr && (
+                <p style={{ color: t.red, fontSize: 13 }}>⚠️ {scheduleErr}</p>
+              )}
+              <div style={{ display: "flex", gap: 12 }}>
+                <button
+                  onClick={() => setShowCreateTemplate(false)}
+                  style={{
+                    flex: 1,
+                    background: t.surface2,
+                    border: `1px solid ${t.border2}`,
+                    color: t.subtle,
+                    fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: "13px 0",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveTemplate}
+                  disabled={scheduling}
+                  style={{
+                    flex: 2,
+                    background: t.text,
+                    color: t.surface,
+                    fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: "13px 0",
+                    borderRadius: 10,
+                    border: "none",
+                    cursor: "pointer",
+                    opacity: scheduling ? 0.7 : 1,
+                  }}
+                >
+                  {scheduling ? "Saving…" : "Save Template"}
+                </button>
+              </div>
+              <div
+                style={{
+                  background: t.accentBg,
+                  border: `1px solid ${t.accentBorder}`,
+                  borderRadius: 10,
+                  padding: "12px 16px",
+                }}
+              >
+                <p
+                  style={{
+                    color: t.accent,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    margin: 0,
+                  }}
+                >
+                  ℹ️ Templates must be approved by WhatsApp Business API before
+                  they can be sent. After saving, submit your template in the
+                  Meta Business Manager for approval.
+                </p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── AUDIENCES TAB ────────────────────────────────────────────────────────────
+function AudiencesTab({ t, restId }) {
+  const [tags, setTags] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [memberCounts, setMemberCounts] = useState({}); // tag_id → count
+  const [specialCounts, setSpecialCounts] = useState({});
+  const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState(TAG_PALETTE[0]);
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagFormErr, setTagFormErr] = useState("");
+  const [delConfirm, setDelConfirm] = useState(null);
+  const [showAddMembers, setShowAddMembers] = useState(null); // tag or special audience
+  const [addMembersData, setAddMembersData] = useState([]);
+  const [addMembersLoading, setAddMembersLoading] = useState(false);
+  const [addMembersSearch, setAddMembersSearch] = useState("");
+  const [tagMemberSet, setTagMemberSet] = useState(new Set());
+  const [specialModal, setSpecialModal] = useState(null); // { audience, members, loading }
+  const [specialModalSearch, setSpecialModalSearch] = useState("");
+
+  const load = useCallback(async () => {
+    if (!restId) return;
+    setTagsLoading(true);
+    try {
+      const { data: tData } = await supabase
+        .from("Tags")
+        .select("id,name,color,created_at")
+        .eq("rest_id", restId)
+        .order("created_at");
+      const tags = tData || [];
+      setTags(tags);
+
+      // Count members per tag
+      if (tags.length > 0) {
+        const counts = {};
+        await Promise.all(
+          tags.map(async (tg) => {
+            const { count } = await supabase
+              .from("Customer_Tags")
+              .select("id", { count: "exact", head: true })
+              .eq("tag_id", tg.id);
+            counts[tg.id] = count || 0;
+          }),
+        );
+        setMemberCounts(counts);
+      }
+
+      // Compute special audience counts
+      await computeSpecialCounts();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTagsLoading(false);
+    }
+  }, [restId]);
+
+  // Shared data-fetching helper used by BOTH computeSpecialCounts and openSpecialAudienceDetails
+  // so the count card and the modal always use identical logic.
+  const buildAudienceData = async () => {
+    const now = new Date();
+    const d30ms = now.getTime() - 30 * 86400000;
+    const d90ms = now.getTime() - 90 * 86400000;
+    const d7ms = now.getTime() - 7 * 86400000;
+    const d30dateStr = new Date(d30ms).toISOString().slice(0, 10);
+
+    // 1. All accepted orders for this restaurant
+    const { data: orders, error: oErr } = await supabase
+      .from("Orders")
+      .select("cust_id, total_amount, created_at")
+      .eq("rest_id", restId)
+      .in("status", ["delivered", "accepted", "preparing", "on_the_way"]);
+    if (oErr) throw oErr;
+    const allOrders = orders || [];
+
+    // 2. Build per-customer stats; use string IDs throughout to avoid type mismatches
+    const custMap = {}; // string → { orders, rev, lastOrderMs }
+    allOrders.forEach((o) => {
+      const id = String(o.cust_id);
+      if (!custMap[id]) custMap[id] = { orders: 0, rev: 0, lastOrderMs: 0 };
+      custMap[id].orders++;
+      custMap[id].rev += Number(o.total_amount || 0);
+      const ms = new Date(o.created_at).getTime();
+      if (ms > custMap[id].lastOrderMs) custMap[id].lastOrderMs = ms;
+    });
+    const custIds = Object.keys(custMap); // string IDs of everyone who ever ordered
+
+    // 3. All customers linked to this restaurant (for new/opencart/potential)
+    const { data: linkedRows, error: lErr } = await supabase
+      .from("Customer_Restaurant")
+      .select("cust_id")
+      .eq("rest_id", restId);
+    if (lErr) throw lErr;
+    const linkedSetStr = new Set(
+      (linkedRows || []).map((r) => String(r.cust_id)),
+    );
+
+    // 4. New customers — joined_on in last 30 days AND linked to restaurant
+    const { data: newRows, error: nErr } = await supabase
+      .from("Customer")
+      .select("id,cust_name,ph_num,joined_on")
+      .gte("joined_on", d30dateStr);
+    if (nErr) throw nErr;
+    const newMembers = (newRows || []).filter((c) =>
+      linkedSetStr.has(String(c.id)),
+    );
+
+    // 5. Active — ordered within last 30 days (timestamp comparison, not Date object)
+    const active = custIds.filter((id) => custMap[id].lastOrderMs >= d30ms);
+
+    // 6. Inactive — last order was 90+ days ago
+    const inactive = custIds.filter((id) => custMap[id].lastOrderMs < d90ms);
+
+    // 7. VIP — top 20% by total lifetime spend (min 1)
+    const sortedByRev = [...custIds].sort(
+      (a, b) => custMap[b].rev - custMap[a].rev,
+    );
+    const vipCutoff = Math.max(1, Math.ceil(sortedByRev.length * 0.2));
+    const vip = sortedByRev.slice(0, vipCutoff);
+
+    // 8. Repeat Buyers — 5+ orders
+    const repeatbuyers = custIds.filter((id) => custMap[id].orders >= 5);
+
+    // 9. High Avg Spend — per-order avg > 2× restaurant-wide per-order avg
+    const totalOrders = allOrders.length;
+    const totalRevSum = Object.values(custMap).reduce((s, c) => s + c.rev, 0);
+    const restaurantAvgOrderValue =
+      totalOrders > 0 ? totalRevSum / totalOrders : 0;
+    const highavg = custIds.filter((id) => {
+      const c = custMap[id];
+      return c.orders > 0 && c.rev / c.orders >= restaurantAvgOrderValue * 2;
+    });
+
+    // 10. Open Cart — linked to restaurant, but no accepted order in last 7 days
+    //     (same source as potential; just a recency filter)
+    const recentOrdererSet = new Set(
+      allOrders
+        .filter((o) => new Date(o.created_at).getTime() >= d7ms)
+        .map((o) => String(o.cust_id)),
+    );
+    const openCart = [...linkedSetStr].filter(
+      (id) => !recentOrdererSet.has(id),
+    );
+
+    // 11. Potential — linked but never placed any accepted order ever
+    const orderedSetStr = new Set(custIds);
+    const potential = [...linkedSetStr].filter((id) => !orderedSetStr.has(id));
+
+    return {
+      custMap,
+      custIds,
+      allOrders,
+      linkedSetStr,
+      active,
+      inactive,
+      vip,
+      repeatbuyers,
+      highavg,
+      openCart,
+      potential,
+      newMembers,
+      d30ms,
+      d90ms,
+      d7ms,
+    };
+  };
+
+  const computeSpecialCounts = async () => {
+    if (!restId) return;
+    try {
+      const d = await buildAudienceData();
+      setSpecialCounts({
+        active: d.active.length,
+        vip: d.vip.length,
+        new: d.newMembers.length,
+        inactive: d.inactive.length,
+        opencart: d.openCart.length,
+        potential: d.potential.length,
+        highavg: d.highavg.length,
+        repeatbuyers: d.repeatbuyers.length,
+      });
+    } catch (e) {
+      console.error("[specialCounts]", e);
+    }
+  };
+
+  // ── Open details modal for a special (smart) audience ──────────────────────
+  const openSpecialAudienceDetails = async (audience) => {
+    setSpecialModal({ audience, members: [], loading: true });
+    setSpecialModalSearch("");
+    try {
+      const d = await buildAudienceData();
+
+      let targetIds = [];
+      let prebuiltMembers = null; // used for audiences that already have full profile data
+
+      switch (audience.id) {
+        case "active":
+          targetIds = d.active;
+          break;
+        case "inactive":
+          targetIds = d.inactive;
+          break;
+        case "vip":
+          targetIds = d.vip;
+          break;
+        case "repeatbuyers":
+          targetIds = d.repeatbuyers;
+          break;
+        case "highavg":
+          targetIds = d.highavg;
+          break;
+        case "opencart":
+          targetIds = d.openCart;
+          break;
+        case "potential":
+          targetIds = d.potential;
+          break;
+        case "new":
+          // newMembers already has full profile rows from buildAudienceData
+          prebuiltMembers = d.newMembers
+            .map((p) => ({
+              id: p.id,
+              name: p.cust_name || "—",
+              phone: p.ph_num || "—",
+              orders: d.custMap[String(p.id)]?.orders ?? 0,
+              rev: d.custMap[String(p.id)]?.rev ?? 0,
+              joined: p.joined_on,
+            }))
+            .sort((a, b) => b.rev - a.rev);
+          break;
+        default:
+          targetIds = [];
+      }
+
+      if (prebuiltMembers) {
+        setSpecialModal({ audience, members: prebuiltMembers, loading: false });
+        return;
+      }
+
+      if (targetIds.length === 0) {
+        setSpecialModal({ audience, members: [], loading: false });
+        return;
+      }
+
+      // Batch fetch in chunks of 500 to avoid Supabase URL-length limits
+      const CHUNK = 500;
+      let profiles = [];
+      for (let i = 0; i < targetIds.length; i += CHUNK) {
+        const chunk = targetIds.slice(i, i + CHUNK);
+        const { data: rows, error } = await supabase
+          .from("Customer")
+          .select("id,cust_name,ph_num,joined_on")
+          .in("id", chunk);
+        if (error) throw error;
+        profiles = profiles.concat(rows || []);
+      }
+
+      const members = profiles
+        .map((p) => ({
+          id: p.id,
+          name: p.cust_name || "—",
+          phone: p.ph_num || "—",
+          orders: d.custMap[String(p.id)]?.orders ?? 0,
+          rev: d.custMap[String(p.id)]?.rev ?? 0,
+          joined: p.joined_on,
+        }))
+        .sort((a, b) => b.rev - a.rev);
+
+      setSpecialModal({ audience, members, loading: false });
+    } catch (e) {
+      console.error("[specialModal]", e);
+      setSpecialModal((prev) =>
+        prev ? { ...prev, loading: false, error: e.message } : null,
+      );
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const createTag = async () => {
+    const name = newTagName.trim();
+    if (!name) {
+      setTagFormErr("Tag name is required.");
+      return;
+    }
+    if (name.length > 30) {
+      setTagFormErr("Max 30 characters.");
+      return;
+    }
+    if (tags.some((tg) => tg.name.toLowerCase() === name.toLowerCase())) {
+      setTagFormErr("Tag already exists.");
+      return;
+    }
+    setTagSaving(true);
+    setTagFormErr("");
+    try {
+      const { data, error } = await supabase
+        .from("Tags")
+        .insert({ rest_id: restId, name, color: newTagColor })
+        .select()
+        .single();
+      if (error) throw error;
+      setTags((p) => [...p, data]);
+      setMemberCounts((p) => ({ ...p, [data.id]: 0 }));
+      setNewTagName("");
+      setNewTagColor(TAG_PALETTE[0]);
+      setShowCreate(false);
+    } catch (e) {
+      setTagFormErr(
+        e.message?.includes("unique")
+          ? "Tag already exists."
+          : e.message || "Failed to create.",
+      );
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const deleteTag = async (tagId) => {
+    await supabase.from("Tags").delete().eq("id", tagId);
+    setTags((p) => p.filter((tg) => tg.id !== tagId));
+    setDelConfirm(null);
+  };
+
+  const openAddMembers = async (tag) => {
+    setShowAddMembers(tag);
+    setAddMembersLoading(true);
+    setAddMembersSearch("");
+    setAddMembersData([]);
+    try {
+      // Load existing members
+      const { data: existing } = await supabase
+        .from("Customer_Tags")
+        .select("cust_id")
+        .eq("tag_id", tag.id);
+      setTagMemberSet(new Set((existing || []).map((r) => r.cust_id)));
+      // Load all restaurant customers
+      const { data: orders } = await supabase
+        .from("Orders")
+        .select("cust_id")
+        .eq("rest_id", restId);
+      const custIds = [...new Set((orders || []).map((o) => o.cust_id))];
+      if (!custIds.length) {
+        setAddMembersData([]);
+        setAddMembersLoading(false);
+        return;
+      }
+      const { data: custs } = await supabase
+        .from("Customer")
+        .select("id,cust_name,ph_num")
+        .in("id", custIds)
+        .order("cust_name");
+      setAddMembersData(custs || []);
+    } catch {
+      setAddMembersData([]);
+    } finally {
+      setAddMembersLoading(false);
+    }
+  };
+
+  const addToTag = async (cust) => {
+    if (!showAddMembers || tagMemberSet.has(cust.id)) return;
+    const { error } = await supabase
+      .from("Customer_Tags")
+      .insert({ tag_id: showAddMembers.id, cust_id: cust.id, rest_id: restId });
+    if (!error) {
+      setTagMemberSet((p) => new Set([...p, cust.id]));
+      setMemberCounts((p) => ({
+        ...p,
+        [showAddMembers.id]: (p[showAddMembers.id] || 0) + 1,
+      }));
+    }
+  };
+
+  const filteredTags = tags.filter(
+    (tg) => !search || tg.name.toLowerCase().includes(search.toLowerCase()),
+  );
+  const filteredSpecial = SPECIAL_AUDIENCES.filter(
+    (s) => !search || s.name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const AudienceCard = ({
+    name,
+    count,
+    color,
+    icon,
+    onDelete,
+    onViewDetails,
+  }) => (
+    <div
+      style={{
+        background: t.surface,
+        border: `2px solid ${t.border}`,
+        borderTop: `3px solid ${color || t.accent}`,
+        borderRadius: 12,
+        padding: "16px 16px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        position: "relative",
+      }}
+    >
+      {onDelete && (
+        <button
+          onClick={onDelete}
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: t.muted,
+            fontSize: 16,
+          }}
+          title="Delete audience"
+        >
+          🗑
+        </button>
+      )}
+      <p
+        style={{
+          fontFamily: "'Lato', sans-serif",
+          color: t.text,
+          fontWeight: 700,
+          fontSize: 14,
+          paddingRight: 24,
+        }}
+      >
+        {icon && <span style={{ marginRight: 6 }}>{icon}</span>}
+        {name}
+      </p>
+      <p
+        style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          color: t.text,
+          fontSize: 36,
+          fontWeight: 800,
+          lineHeight: 1,
+          margin: "4px 0",
+        }}
+      >
+        {count ?? "—"}
+      </p>
+      <p
+        style={{
+          color: t.muted,
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 12,
+        }}
+      >
+        Total members
+      </p>
+      <button
+        onClick={onViewDetails}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          color: t.accent,
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 12,
+          fontWeight: 600,
+          padding: 0,
+          marginTop: 4,
+        }}
+      >
+        👁 View Audience Details ›
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px 24px 40px" }}>
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginBottom: 20,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 0 }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              opacity: 0.4,
+              fontSize: 14,
+            }}
+          >
+            🔍
+          </span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search audience…"
+            style={{
+              width: "100%",
+              paddingLeft: 36,
+              paddingRight: 14,
+              paddingTop: 10,
+              paddingBottom: 10,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              borderRadius: 99,
+              fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          style={{
+            background: t.text,
+            color: t.surface,
+            fontFamily: "'Lato', sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            padding: "10px 18px",
+            borderRadius: 10,
+            border: "none",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          + Create Audience
+        </button>
+        <button
+          onClick={() => setShowAddMembers({ id: null, name: "All Audiences" })}
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.border2}`,
+            color: t.text,
+            fontFamily: "'Lato', sans-serif",
+            fontWeight: 700,
+            fontSize: 13,
+            padding: "10px 18px",
+            borderRadius: 10,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Add Audience Members
+        </button>
+      </div>
+
+      {/* Create tag modal */}
+      {showCreate && (
+        <>
+          <div
+            onClick={() => setShowCreate(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 16,
+              padding: 28,
+              width: "min(420px, calc(100vw - 32px))",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                color: t.text,
+                fontSize: 22,
+                fontWeight: 800,
+                marginBottom: 16,
+              }}
+            >
+              Create Audience
+            </p>
+            <label
+              style={{
+                color: t.subtle,
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                display: "block",
+                marginBottom: 6,
+              }}
+            >
+              Audience Name
+            </label>
+            <input
+              value={newTagName}
+              onChange={(e) => {
+                setNewTagName(e.target.value);
+                setTagFormErr("");
+              }}
+              onKeyDown={(e) => e.key === "Enter" && createTag()}
+              placeholder="e.g. Female, VIP, Weekend Diners…"
+              maxLength={30}
+              style={{
+                width: "100%",
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: t.text,
+                fontFamily: "'Lato', sans-serif",
+                padding: "10px 12px",
+                borderRadius: 8,
+                fontSize: 13,
+                marginBottom: 14,
+                boxSizing: "border-box",
+              }}
+            />
+            <label
+              style={{
+                color: t.subtle,
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                display: "block",
+                marginBottom: 8,
+              }}
+            >
+              Colour
+            </label>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                marginBottom: 16,
+              }}
+            >
+              {TAG_PALETTE.map((col) => (
+                <button
+                  key={col}
+                  onClick={() => setNewTagColor(col)}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    background: col,
+                    border:
+                      newTagColor === col
+                        ? `3px solid ${t.text}`
+                        : "3px solid transparent",
+                    cursor: "pointer",
+                  }}
+                />
+              ))}
+            </div>
+            {tagFormErr && (
+              <p style={{ color: t.red, fontSize: 12, marginBottom: 10 }}>
+                ⚠️ {tagFormErr}
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => setShowCreate(false)}
+                style={{
+                  flex: 1,
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  color: t.subtle,
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  padding: "11px 0",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createTag}
+                disabled={tagSaving}
+                style={{
+                  flex: 2,
+                  background: t.text,
+                  color: t.surface,
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  padding: "11px 0",
+                  borderRadius: 8,
+                  border: "none",
+                  cursor: "pointer",
+                  opacity: tagSaving ? 0.7 : 1,
+                }}
+              >
+                {tagSaving ? "Creating…" : "Create Audience"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Special audiences */}
+      {!search && (
+        <div style={{ marginBottom: 28 }}>
+          <p
+            style={{
+              color: t.subtle,
+              fontFamily: "'Lato', sans-serif",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: ".08em",
+              textTransform: "uppercase",
+              marginBottom: 14,
+            }}
+          >
+            Smart Audiences
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {SPECIAL_AUDIENCES.map((s) => (
+              <AudienceCard
+                key={s.id}
+                name={s.name}
+                count={specialCounts[s.id]}
+                color={s.color}
+                icon={s.icon}
+                onViewDetails={() => openSpecialAudienceDetails(s)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Custom tag audiences */}
+      <div>
+        <p
+          style={{
+            color: t.subtle,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: ".08em",
+            textTransform: "uppercase",
+            marginBottom: 14,
+          }}
+        >
+          {search ? "Search Results" : "Custom Audiences"}
+        </p>
+        {tagsLoading ? (
+          <p style={{ color: t.muted, fontSize: 13 }}>Loading…</p>
+        ) : filteredTags.length === 0 && !search ? (
+          <div
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 12,
+              padding: "28px 16px",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ color: t.muted, fontSize: 14 }}>
+              No custom audiences yet. Create one above.
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {filteredTags.map((tag) => (
+              <div key={tag.id}>
+                <AudienceCard
+                  name={tag.name}
+                  count={memberCounts[tag.id] ?? "…"}
+                  color={tag.color}
+                  icon="🏷️"
+                  onDelete={() => setDelConfirm(tag.id)}
+                  onViewDetails={() => openAddMembers(tag)}
+                />
+                {delConfirm === tag.id && (
+                  <div
+                    style={{
+                      background: "#FEF2F2",
+                      border: "1px solid #FECACA",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      marginTop: 6,
+                    }}
+                  >
+                    <p
+                      style={{
+                        color: "#B83232",
+                        fontSize: 12,
+                        marginBottom: 8,
+                      }}
+                    >
+                      Delete "{tag.name}"? All member links removed.
+                    </p>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => setDelConfirm(null)}
+                        style={{
+                          flex: 1,
+                          background: "none",
+                          border: `1px solid ${t.border2}`,
+                          color: t.subtle,
+                          borderRadius: 6,
+                          padding: "5px 0",
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => deleteTag(tag.id)}
+                        style={{
+                          flex: 1,
+                          background: "#B83232",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "5px 0",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {search &&
+              filteredSpecial.map((s) => (
+                <AudienceCard
+                  key={s.id}
+                  name={s.name}
+                  count={specialCounts[s.id]}
+                  color={s.color}
+                  icon={s.icon}
+                  onViewDetails={() => openSpecialAudienceDetails(s)}
+                />
+              ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add members panel */}
+      {showAddMembers && showAddMembers.id && (
+        <>
+          <div
+            onClick={() => setShowAddMembers(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 16,
+              padding: 24,
+              width: "min(480px, calc(100vw - 32px))",
+              maxHeight: "70vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+              }}
+            >
+              <p
+                style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  color: t.text,
+                  fontSize: 20,
+                  fontWeight: 700,
+                }}
+              >
+                {showAddMembers.name}
+              </p>
+              <button
+                onClick={() => setShowAddMembers(null)}
+                style={{
+                  background: t.surface2,
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 30,
+                  height: 30,
+                  cursor: "pointer",
+                  color: t.subtle,
+                  fontSize: 16,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <input
+              value={addMembersSearch}
+              onChange={(e) => setAddMembersSearch(e.target.value)}
+              placeholder="Search customers…"
+              style={{
+                width: "100%",
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: t.text,
+                fontFamily: "'Lato', sans-serif",
+                padding: "9px 12px",
+                borderRadius: 8,
+                fontSize: 13,
+                boxSizing: "border-box",
+                marginBottom: 12,
+              }}
+            />
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {addMembersLoading ? (
+                <p style={{ color: t.muted, fontSize: 13 }}>Loading…</p>
+              ) : (
+                addMembersData
+                  .filter(
+                    (c) =>
+                      !addMembersSearch ||
+                      (c.cust_name || "")
+                        .toLowerCase()
+                        .includes(addMembersSearch.toLowerCase()) ||
+                      (c.ph_num || "").includes(addMembersSearch),
+                  )
+                  .map((cust) => {
+                    const inTag = tagMemberSet.has(cust.id);
+                    return (
+                      <div
+                        key={cust.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "8px 0",
+                          borderBottom: `1px solid ${t.border}`,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <p
+                            style={{
+                              color: t.text,
+                              fontSize: 13,
+                              fontWeight: 600,
+                              fontFamily: "'Lato', sans-serif",
+                            }}
+                          >
+                            {cust.cust_name || "—"}
+                          </p>
+                          <p
+                            style={{
+                              color: t.muted,
+                              fontSize: 11,
+                              fontFamily: "'Lato', sans-serif",
+                            }}
+                          >
+                            {cust.ph_num || ""}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => addToTag(cust)}
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "4px 12px",
+                            borderRadius: 6,
+                            border: "none",
+                            cursor: inTag ? "default" : "pointer",
+                            background: inTag ? t.greenBg : t.accentBg,
+                            color: inTag ? t.green : t.accent,
+                          }}
+                        >
+                          {inTag ? "✓ Added" : "+ Add"}
+                        </button>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Special Audience Details Modal ─────────────────────────────────── */}
+      {specialModal && (
+        <>
+          <div
+            onClick={() => setSpecialModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              zIndex: 200,
+            }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%,-50%)",
+              zIndex: 201,
+              background: t.surface,
+              borderRadius: 18,
+              width: "min(520px, calc(100vw - 24px))",
+              maxHeight: "80vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
+              overflow: "hidden",
+            }}
+          >
+            {/* Modal header */}
+            <div
+              style={{
+                background: specialModal.audience.color,
+                padding: "20px 24px 16px",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div>
+                  <p
+                    style={{
+                      color: "#fff",
+                      fontFamily: "'Cormorant Garamond', serif",
+                      fontSize: 22,
+                      fontWeight: 800,
+                      margin: 0,
+                    }}
+                  >
+                    {specialModal.audience.icon} {specialModal.audience.name}
+                  </p>
+                  <p
+                    style={{
+                      color: "rgba(255,255,255,0.75)",
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    {specialModal.audience.desc}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSpecialModal(null)}
+                  style={{
+                    background: "rgba(255,255,255,0.2)",
+                    border: "none",
+                    borderRadius: "50%",
+                    width: 32,
+                    height: 32,
+                    cursor: "pointer",
+                    color: "#fff",
+                    fontSize: 16,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  background: "rgba(255,255,255,0.15)",
+                  borderRadius: 8,
+                  padding: "6px 14px",
+                  display: "inline-block",
+                }}
+              >
+                <span
+                  style={{
+                    color: "#fff",
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {specialModal.loading
+                    ? "Loading…"
+                    : `${specialModal.members?.length ?? 0} members`}
+                </span>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div
+              style={{
+                padding: "14px 20px 10px",
+                flexShrink: 0,
+                borderBottom: `1px solid ${t.border}`,
+              }}
+            >
+              <input
+                value={specialModalSearch}
+                onChange={(e) => setSpecialModalSearch(e.target.value)}
+                placeholder="Search by name or phone…"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  background: t.surface2,
+                  border: `1px solid ${t.border2}`,
+                  color: t.text,
+                  fontFamily: "'Lato', sans-serif",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              />
+            </div>
+
+            {/* Member list */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+              {specialModal.loading ? (
+                <div style={{ padding: "32px 20px", textAlign: "center" }}>
+                  <p
+                    style={{
+                      color: t.muted,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                    }}
+                  >
+                    Loading members…
+                  </p>
+                </div>
+              ) : specialModal.error ? (
+                <div style={{ padding: "32px 20px", textAlign: "center" }}>
+                  <p
+                    style={{
+                      color: t.red,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                    }}
+                  >
+                    ⚠️ {specialModal.error}
+                  </p>
+                </div>
+              ) : specialModal.members.length === 0 ? (
+                <div style={{ padding: "40px 20px", textAlign: "center" }}>
+                  <div style={{ fontSize: 36, marginBottom: 10, opacity: 0.3 }}>
+                    {specialModal.audience.icon}
+                  </div>
+                  <p
+                    style={{
+                      color: t.muted,
+                      fontFamily: "'Lato', sans-serif",
+                      fontSize: 13,
+                    }}
+                  >
+                    No members in this audience yet.
+                  </p>
+                </div>
+              ) : (
+                specialModal.members
+                  .filter((m) => {
+                    if (!specialModalSearch) return true;
+                    const q = specialModalSearch.toLowerCase();
+                    return (
+                      (m.name || "").toLowerCase().includes(q) ||
+                      (m.phone || "").includes(q)
+                    );
+                  })
+                  .map((m, i) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "10px 20px",
+                        borderBottom: `1px solid ${t.border}`,
+                        background:
+                          i % 2 === 0 ? "transparent" : t.surface2 + "55",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: "50%",
+                          background: specialModal.audience.color + "22",
+                          border: `1.5px solid ${specialModal.audience.color}44`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontFamily: "'Cormorant Garamond', serif",
+                          fontWeight: 800,
+                          color: specialModal.audience.color,
+                          fontSize: 14,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(m.name || "?").charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p
+                          style={{
+                            color: t.text,
+                            fontFamily: "'Lato', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 13,
+                            margin: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {m.name}
+                        </p>
+                        <p
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            margin: 0,
+                            marginTop: 1,
+                          }}
+                        >
+                          {m.phone || "—"}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <p
+                          style={{
+                            color: t.accent,
+                            fontFamily: "'Cormorant Garamond', serif",
+                            fontWeight: 800,
+                            fontSize: 14,
+                            margin: 0,
+                          }}
+                        >
+                          KD {Number(m.rev || 0).toFixed(3)}
+                        </p>
+                        <p
+                          style={{
+                            color: t.muted,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            margin: 0,
+                            marginTop: 1,
+                          }}
+                        >
+                          {m.orders} order{m.orders !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+function AudienceMembersTab({ t, restId }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [deleting, setDeleting] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!restId) return;
+    setLoading(true);
+    try {
+      const { data } = await supabase
+        .from("Customer_Tags")
+        .select(
+          "id, cust_id, added_at, rest_id, tag_id, Tags(name, color), Customer(cust_name, ph_num, broadcast)",
+        )
+        .eq("rest_id", restId)
+        .order("added_at", { ascending: false });
+      setMembers(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [restId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const filtered = members.filter((m) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (m.Customer?.cust_name || "").toLowerCase().includes(q) ||
+      (m.Customer?.ph_num || "").includes(q) ||
+      (m.Tags?.name || "").toLowerCase().includes(q)
+    );
+  });
+
+  const toggleSelect = (id) =>
+    setSelectedIds((p) => {
+      const n = new Set(p);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelectedIds(
+      selectedIds.size === filtered.length
+        ? new Set()
+        : new Set(filtered.map((m) => m.id)),
+    );
+
+  const deleteSelected = async () => {
+    if (!selectedIds.size) return;
+    setDeleting(true);
+    await supabase
+      .from("Customer_Tags")
+      .delete()
+      .in("id", [...selectedIds]);
+    setMembers((p) => p.filter((m) => !selectedIds.has(m.id)));
+    setSelectedIds(new Set());
+    setDeleting(false);
+  };
+
+  return (
+    <div style={{ padding: "20px 24px 40px" }}>
+      <style>{`
+        .am-table { width: 100%; border-collapse: collapse; min-width: 580px; }
+        .am-table th { padding: 12px 14px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+        .am-table td { padding: 12px 14px; font-size: 13px; vertical-align: middle; border-bottom: 1px solid; white-space: nowrap; }
+        .am-table tr:hover td { filter: brightness(0.97); }
+        @media(max-width:600px){ .am-table th, .am-table td { padding: 9px 10px; font-size: 12px; } }
+      `}</style>
+
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 11,
+              top: "50%",
+              transform: "translateY(-50%)",
+              opacity: 0.4,
+              fontSize: 14,
+            }}
+          >
+            🔍
+          </span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search table…"
+            style={{
+              width: "100%",
+              paddingLeft: 34,
+              paddingRight: 14,
+              paddingTop: 9,
+              paddingBottom: 9,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              borderRadius: 8,
+              fontSize: 13,
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        {selectedIds.size > 0 && (
+          <button
+            onClick={deleteSelected}
+            disabled={deleting}
+            style={{
+              background: t.text,
+              color: t.surface,
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              fontSize: 13,
+              padding: "9px 18px",
+              borderRadius: 8,
+              border: "none",
+              cursor: "pointer",
+              opacity: deleting ? 0.7 : 1,
+            }}
+          >
+            {deleting ? "Deleting…" : `Delete Selected (${selectedIds.size})`}
+          </button>
+        )}
+        <button
+          onClick={load}
+          style={{
+            background: t.surface2,
+            border: `1px solid ${t.border2}`,
+            color: t.subtle,
+            fontFamily: "'Lato', sans-serif",
+            fontSize: 13,
+            padding: "9px 14px",
+            borderRadius: 8,
+            cursor: "pointer",
+          }}
+        >
+          ↺ Refresh
+        </button>
+      </div>
+
+      {loading ? (
+        <p style={{ color: t.muted, fontSize: 13 }}>Loading members…</p>
+      ) : (
+        <div
+          style={{
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            borderRadius: 12,
+            border: `1px solid ${t.border}`,
+          }}
+        >
+          <table className="am-table">
+            <thead>
+              <tr style={{ background: t.text, color: t.surface }}>
+                <th style={{ color: "#fff", width: 44 }}>
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedIds.size > 0 &&
+                      selectedIds.size === filtered.length
+                    }
+                    onChange={toggleAll}
+                    style={{ accentColor: "#fff", width: 15, height: 15 }}
+                  />
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Phone Number
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Member Name
+                </th>
+                <th
+                  style={{
+                    color: "#fff",
+                    fontFamily: "'Lato', sans-serif",
+                    textAlign: "center",
+                  }}
+                >
+                  🔊
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Audiences
+                </th>
+                <th style={{ color: "#fff", fontFamily: "'Lato', sans-serif" }}>
+                  Added
+                </th>
+                <th style={{ color: "#fff", width: 70 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    style={{
+                      color: t.muted,
+                      textAlign: "center",
+                      padding: "32px 14px",
+                      fontFamily: "'Lato', sans-serif",
+                      borderBottom: "none",
+                    }}
+                  >
+                    {search
+                      ? "No members match your search."
+                      : "No audience members yet."}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((m, i) => (
+                  <tr
+                    key={m.id}
+                    style={{
+                      background: i % 2 === 0 ? t.surface : t.surface2,
+                      cursor: "default",
+                    }}
+                  >
+                    <td style={{ color: t.text, borderBottomColor: t.border }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(m.id)}
+                        onChange={() => toggleSelect(m.id)}
+                        style={{ accentColor: t.accent, width: 15, height: 15 }}
+                      />
+                    </td>
+                    <td
+                      style={{
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        borderBottomColor: t.border,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {m.Customer?.ph_num || "—"}
+                    </td>
+                    <td
+                      style={{
+                        color: t.text,
+                        fontFamily: "'Lato', sans-serif",
+                        borderBottomColor: t.border,
+                      }}
+                    >
+                      {m.Customer?.cust_name || "—"}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "center",
+                        borderBottomColor: t.border,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "'Lato', sans-serif",
+                          fontSize: 12,
+                          color: m.Customer?.broadcast ? t.green : t.muted,
+                        }}
+                      >
+                        {m.Customer?.broadcast ? "Yes" : "No"}
+                      </span>
+                    </td>
+                    <td style={{ borderBottomColor: t.border }}>
+                      {m.Tags ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            background: (m.Tags.color || t.accent) + "22",
+                            border: `1px solid ${m.Tags.color || t.accent}44`,
+                            color: m.Tags.color || t.accent,
+                            fontFamily: "'Lato', sans-serif",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "3px 10px",
+                            borderRadius: 99,
+                          }}
+                        >
+                          {m.Tags.name}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        color: t.muted,
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 12,
+                        borderBottomColor: t.border,
+                      }}
+                    >
+                      {new Date(m.added_at).toLocaleDateString("en-KW", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </td>
+                    <td style={{ borderBottomColor: t.border }}>
+                      <button
+                        onClick={async () => {
+                          await supabase
+                            .from("Customer_Tags")
+                            .delete()
+                            .eq("id", m.id);
+                          setMembers((p) => p.filter((x) => x.id !== m.id));
+                        }}
+                        style={{
+                          background: "#FEF2F2",
+                          border: "1px solid #FECACA",
+                          color: "#B83232",
+                          borderRadius: 6,
+                          padding: "4px 8px",
+                          cursor: "pointer",
+                          fontSize: 13,
+                        }}
+                        title="Remove from audience"
+                      >
+                        🗑
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+          {filtered.length > 0 && (
+            <div
+              style={{
+                padding: "10px 16px",
+                background: t.surface2,
+                borderTop: `1px solid ${t.border}`,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <p
+                style={{
+                  color: t.muted,
+                  fontFamily: "'Lato', sans-serif",
+                  fontSize: 12,
+                }}
+              >
+                {filtered.length} member{filtered.length !== 1 ? "s" : ""}
+              </p>
+              {selectedIds.size > 0 && (
+                <p
+                  style={{
+                    color: t.accent,
+                    fontFamily: "'Lato', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {selectedIds.size} selected
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -3974,94 +8399,287 @@ const STATUS_META = {
     bg: "rgba(45,122,79,0.08)",
   },
   rejected: { label: "Rejected", color: "#B83232", bg: "rgba(184,50,50,0.08)" },
+  cancelled: { label: "Cancelled", color: "#B83232", bg: "rgba(184,50,50,0.08)" },
 };
 
 // ─── Invoice Generator (opens print dialog with styled HTML) ─────────────────
-function printInvoice(order, items, restaurant) {
-  const rows = (items || [])
-    .map(
-      (it) => `
-    <tr>
-      <td style="padding:8px 12px;color:#555;font-size:13px">${it.quantity}×</td>
-      <td style="padding:8px 12px;font-size:13px">
-        ${it.menu_name || it.menu_id}
-        ${it.item_note ? `<div style="font-size:11px;color:#888;font-style:italic">↳ ${it.item_note}</div>` : ""}
-        ${(it.variants || []).map((v) => `<div style="font-size:11px;color:#C4711A">· ${v}</div>`).join("")}
-      </td>
-      <td style="padding:8px 12px;text-align:right;font-weight:600;font-size:13px">KD ${Number(it.unit_price).toFixed(3)}</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:13px">KD ${Number(it.subtotal).toFixed(3)}</td>
-    </tr>`,
-    )
-    .join("");
+function printInvoice(order, items, restaurant, discount, deliveryAddr) {
+  // ── computed values ─────────────────────────────────────────────────────────
+  const isPickup = order.order_type === "pickup";
+  const safeItems = items || [];
+  const itemsSubtotal = safeItems.reduce(
+    (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
+    0,
+  );
+  const deliveryFee = isPickup ? 0 : 0.5;
+  const discountAmt = discount?.amount_saved ?? 0;
+  const grandTotal = Number(
+    order.total_amount ?? itemsSubtotal + deliveryFee - discountAmt,
+  );
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-  <title>Invoice #${order.id}</title>
+  // ── item rows ───────────────────────────────────────────────────────────────
+  const itemRows =
+    safeItems
+      .map(
+        (it, idx) => `
+    <tr class="${idx % 2 === 0 ? "row-even" : "row-odd"}">
+      <td class="td-qty">${it.quantity}×</td>
+      <td class="td-name">
+        <span class="item-name">${it.menu_name || it.menu_id || "Item"}</span>
+        ${(it.variants || []).map((v) => `<span class="item-variant">· ${v}</span>`).join("")}
+        ${it.item_note ? `<span class="item-note">📝 ${it.item_note}</span>` : ""}
+      </td>
+      <td class="td-price">KD ${Number(it.unit_price).toFixed(3)}</td>
+      <td class="td-sub">KD ${Number(it.subtotal ?? it.unit_price * it.quantity ?? 0).toFixed(3)}</td>
+    </tr>`,
+      )
+      .join("") ||
+    `<tr><td colspan="4" style="padding:16px;text-align:center;color:#aaa;font-style:italic">No items recorded</td></tr>`;
+
+  // ── address line ────────────────────────────────────────────────────────────
+  const addrLine = deliveryAddr
+    ? [
+        deliveryAddr.apartment_no && `Apt ${deliveryAddr.apartment_no}`,
+        deliveryAddr.floor && `Floor ${deliveryAddr.floor}`,
+        deliveryAddr.bldg_name,
+        deliveryAddr.street,
+        deliveryAddr.block,
+        deliveryAddr.landmark,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : order.deliveryAddress || "";
+
+  // ── status pill colours ─────────────────────────────────────────────────────
+  const statusColours = {
+    pending: { bg: "#fff7ed", color: "#c4711a", border: "#fed7aa" },
+    accepted: { bg: "#eff6ff", color: "#2563eb", border: "#bfdbfe" },
+    preparing: { bg: "#f5f3ff", color: "#7c3aed", border: "#ddd6fe" },
+    on_the_way: { bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
+    delivered: { bg: "#f0fdf4", color: "#15803d", border: "#bbf7d0" },
+    rejected: { bg: "#fef2f2", color: "#b91c1c", border: "#fecaca" },
+  };
+  const sc = statusColours[order.status] || statusColours.pending;
+  const statusLabel = STATUS_META[order.status]?.label || order.status || "—";
+
+  // ── discount row ────────────────────────────────────────────────────────────
+  const discountRow =
+    discount && discountAmt > 0
+      ? `
+    <div class="tally-row discount-row">
+      <span class="tally-label">
+        <span class="disc-pill">🏷 ${discount.code}</span>
+        <span class="disc-type">${discount.type === "percentage" ? `${discount.value}% off` : `KD ${Number(discount.value).toFixed(3)} off`}</span>
+      </span>
+      <span class="tally-value discount-value">−KD ${discountAmt.toFixed(3)}</span>
+    </div>`
+      : "";
+
+  // ── print timestamp ─────────────────────────────────────────────────────────
+  const now = new Date().toLocaleString("en-KW", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Invoice #${order.id} — ${restaurant?.name || "Restaurant"}</title>
   <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;color:#1a1a1a;padding:40px;max-width:680px;margin:0 auto}
-    .logo{font-size:28px;font-weight:900;color:#C4711A;letter-spacing:-0.5px}
-    .tagline{font-size:11px;color:#999;letter-spacing:.12em;text-transform:uppercase;margin-top:2px}
-    .divider{border:none;border-top:1px solid #eee;margin:20px 0}
-    .header-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px}
-    .label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#aaa;margin-bottom:4px}
-    .value{font-size:14px;font-weight:600;color:#1a1a1a}
-    .badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;background:#fff3e0;color:#C4711A;border:1px solid #fed7aa}
-    table{width:100%;border-collapse:collapse;margin-top:8px}
-    thead th{background:#f9f6f2;padding:10px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#888}
-    thead th:nth-child(3),thead th:nth-child(4){text-align:right}
-    tbody tr:nth-child(even){background:#fafafa}
-    tbody tr:last-child td{border-bottom:1px solid #eee}
-    .total-row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#555}
-    .total-row.grand{font-size:17px;font-weight:800;color:#1a1a1a;border-top:2px solid #1a1a1a;margin-top:8px;padding-top:12px}
-    .footer{text-align:center;font-size:11px;color:#bbb;margin-top:36px;padding-top:20px;border-top:1px solid #eee}
-    @media print{body{padding:20px}.no-print{display:none}}
-  </style></head><body>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px">
-    <div>
-      <div class="logo">${restaurant?.name || "Ungrie"}</div>
-      <div class="tagline">${restaurant?.branch_name || "Restaurant"}</div>
-    </div>
-    <div style="text-align:right">
-      <div style="font-size:22px;font-weight:800;color:#1a1a1a">INVOICE</div>
-      <div style="font-size:13px;color:#888;margin-top:2px">#${order.id}</div>
-      <div class="badge" style="margin-top:6px">${STATUS_META[order.status]?.label || order.status}</div>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap');
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f5f5f5;color:#1a1a1a;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .page{max-width:720px;margin:32px auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.12)}
+    /* Hero */
+    .hero{background:linear-gradient(135deg,#1a1208 0%,#2d1f0a 50%,#3d2a0e 100%);padding:36px 40px 32px;position:relative;overflow:hidden}
+    .hero::before{content:'';position:absolute;top:-60px;right:-60px;width:220px;height:220px;background:radial-gradient(circle,rgba(196,113,26,.25) 0%,transparent 70%);border-radius:50%}
+    .hero::after{content:'';position:absolute;bottom:-40px;left:30%;width:160px;height:160px;background:radial-gradient(circle,rgba(196,113,26,.12) 0%,transparent 70%);border-radius:50%}
+    .hero-inner{position:relative;z-index:1;display:flex;justify-content:space-between;align-items:flex-start}
+    .brand-name{font-family:'Playfair Display',Georgia,serif;font-size:32px;font-weight:800;color:#fff;letter-spacing:-.5px;line-height:1}
+    .brand-sub{font-size:11px;color:rgba(255,255,255,.5);letter-spacing:.18em;text-transform:uppercase;margin-top:5px}
+    .invoice-label{text-align:right}
+    .invoice-word{font-size:11px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:rgba(255,255,255,.45)}
+    .invoice-num{font-family:'Playfair Display',Georgia,serif;font-size:28px;font-weight:800;color:#C4711A;line-height:1.1}
+    .status-pill{display:inline-block;margin-top:7px;padding:4px 12px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border}}
+    /* Accent stripe */
+    .accent-stripe{height:4px;background:linear-gradient(90deg,#C4711A 0%,#e8911a 50%,#f5c068 100%)}
+    /* Body */
+    .body{padding:36px 40px}
+    /* Meta grid */
+    .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #f0ece6;border-radius:14px;overflow:hidden;margin-bottom:28px}
+    .meta-cell{padding:16px 20px;border-right:1px solid #f0ece6;border-bottom:1px solid #f0ece6}
+    .meta-cell:nth-child(2n){border-right:none}
+    .meta-cell:nth-last-child(-n+2){border-bottom:none}
+    .meta-cell.full{grid-column:1/-1;border-right:none}
+    .meta-cell.full:last-child{border-bottom:none}
+    .cell-label{font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#b0a898;margin-bottom:4px}
+    .cell-value{font-size:13.5px;font-weight:600;color:#1a1a1a;line-height:1.3}
+    .cell-sub{font-size:12px;color:#888;margin-top:2px}
+    /* Section heading */
+    .section-heading{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+    .sh-text{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#C4711A}
+    .sh-line{flex:1;height:1px;background:#f0ece6}
+    /* Items table */
+    .items-table{width:100%;border-collapse:collapse;border-radius:14px;overflow:hidden;margin-bottom:24px}
+    .items-table thead tr{background:#f9f6f2}
+    .items-table thead th{padding:11px 14px;font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#b0a898;border-bottom:2px solid #f0ece6;text-align:left}
+    .items-table thead th:nth-child(3),.items-table thead th:nth-child(4){text-align:right}
+    .td-qty{padding:13px 14px;font-size:13px;color:#C4711A;font-weight:700;vertical-align:top;white-space:nowrap}
+    .td-name{padding:13px 14px;vertical-align:top}
+    .td-price{padding:13px 14px;text-align:right;font-size:13px;color:#666;vertical-align:top;white-space:nowrap}
+    .td-sub{padding:13px 14px;text-align:right;font-size:13px;font-weight:700;color:#1a1a1a;vertical-align:top;white-space:nowrap}
+    .row-even{background:#fff}
+    .row-odd{background:#fdfcfb}
+    .items-table tbody tr:last-child td{border-bottom:1px solid #f0ece6}
+    .item-name{display:block;font-size:13.5px;font-weight:600;color:#1a1a1a}
+    .item-variant{display:block;font-size:11px;color:#C4711A;margin-top:2px}
+    .item-note{display:block;font-size:11px;color:#aaa;font-style:italic;margin-top:2px}
+    /* Tally */
+    .tally-box{background:#f9f6f2;border:1px solid #f0ece6;border-radius:14px;overflow:hidden;margin-bottom:28px}
+    .tally-inner{padding:6px 20px 4px}
+    .tally-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #ede9e2;font-size:13.5px}
+    .tally-row:last-child{border-bottom:none}
+    .tally-label{color:#666;font-weight:500;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .tally-value{color:#1a1a1a;font-weight:600}
+    .discount-row .tally-label{color:#15803d}
+    .discount-value{color:#15803d!important;font-weight:700!important}
+    .disc-pill{display:inline-block;background:#dcfce7;border:1px solid #bbf7d0;color:#15803d;border-radius:999px;padding:2px 9px;font-size:10px;font-weight:800;letter-spacing:.06em}
+    .disc-type{font-size:11px;color:#888}
+    .tally-grand{background:linear-gradient(135deg,#1a1208,#2d1f0a);padding:16px 20px;display:flex;justify-content:space-between;align-items:center}
+    .tally-grand-label{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.7)}
+    .tally-grand-value{font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:800;color:#C4711A}
+    /* Info card */
+    .info-card{border:1px solid #f0ece6;border-radius:14px;padding:16px 20px;margin-bottom:16px}
+    .info-card-label{font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#b0a898;margin-bottom:8px}
+    .info-card-value{font-size:13.5px;font-weight:600;color:#1a1a1a}
+    .info-card-sub{font-size:12px;color:#888;margin-top:3px}
+    /* Notes */
+    .notes-box{background:#fffbf5;border:1px solid #fed7aa;border-left:3px solid #C4711A;border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#666;font-style:italic}
+    /* Footer */
+    .footer{background:#f9f6f2;border-top:1px solid #f0ece6;padding:24px 40px;text-align:center}
+    .footer-thank{font-family:'Playfair Display',Georgia,serif;font-size:18px;color:#C4711A;margin-bottom:6px}
+    .footer-line{width:40px;height:2px;background:#C4711A;border-radius:2px;margin:10px auto}
+    .footer-sub{font-size:11px;color:#bbb;letter-spacing:.06em}
+    .print-meta{font-size:10px;color:#ccc;margin-top:10px}
+    @media print{body{background:#fff}.page{margin:0;border-radius:0;box-shadow:none}@page{margin:0;size:A4}}
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <div class="hero-inner">
+      <div>
+        <div class="brand-name">${restaurant?.name || "Ungrie"}</div>
+        <div class="brand-sub">${restaurant?.branch_name || "Restaurant"}</div>
+      </div>
+      <div class="invoice-label">
+        <div class="invoice-word">Invoice</div>
+        <div class="invoice-num">#${order.id}</div>
+        <div><span class="status-pill">${statusLabel}</span></div>
+      </div>
     </div>
   </div>
-  <hr class="divider">
-  <div class="header-grid">
-    <div>
-      <div class="label">Customer</div>
-      <div class="value">${order.cust_name || "—"}</div>
-      <div style="font-size:13px;color:#555;margin-top:2px">${order.cust_phone || ""}</div>
+  <div class="accent-stripe"></div>
+  <div class="body">
+    <div class="meta-grid">
+      <div class="meta-cell">
+        <div class="cell-label">Customer</div>
+        <div class="cell-value">${order.cust_name || "—"}</div>
+        ${order.cust_phone ? `<div class="cell-sub">${order.cust_phone}</div>` : ""}
+      </div>
+      <div class="meta-cell">
+        <div class="cell-label">Order date</div>
+        <div class="cell-value">${fmtDate(order.created_at)}</div>
+      </div>
+      <div class="meta-cell">
+        <div class="cell-label">Payment method</div>
+        <div class="cell-value">${order.payment_method || "—"}</div>
+      </div>
+      <div class="meta-cell">
+        <div class="cell-label">Payment status</div>
+        <div class="cell-value" style="text-transform:capitalize">${order.payment_status || "Pending"}</div>
+      </div>
+      ${
+        isPickup
+          ? `
+      <div class="meta-cell full" style="background:#f0fdfa;border-color:#99f6e4;">
+        <div class="cell-label" style="color:#0f766e">Order type</div>
+        <div class="cell-value" style="color:#0f766e">🏃 Pickup — Customer will collect in person</div>
+      </div>`
+          : order.delivery_rider_name
+          ? `
+      <div class="meta-cell">
+        <div class="cell-label">Delivery rider</div>
+        <div class="cell-value">${order.delivery_rider_name}</div>
+        ${order.delivery_rider_phone ? `<div class="cell-sub">${order.delivery_rider_phone}</div>` : ""}
+      </div>
+      <div class="meta-cell"></div>`
+          : ""
+      }
     </div>
-    <div>
-      <div class="label">Order date</div>
-      <div class="value">${fmtDate(order.created_at)}</div>
+    ${
+      order.notes
+        ? `
+    <div class="section-heading"><span class="sh-text">Order Notes</span><div class="sh-line"></div></div>
+    <div class="notes-box">"${order.notes}"</div>`
+        : ""
+    }
+    <div class="section-heading"><span class="sh-text">Order Items</span><div class="sh-line"></div></div>
+    <table class="items-table">
+      <thead><tr>
+        <th style="width:52px">Qty</th>
+        <th>Item</th>
+        <th style="text-align:right;width:100px">Unit Price</th>
+        <th style="text-align:right;width:110px">Subtotal</th>
+      </tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="section-heading"><span class="sh-text">Bill Summary</span><div class="sh-line"></div></div>
+    <div class="tally-box">
+      <div class="tally-inner">
+        <div class="tally-row">
+          <span class="tally-label">Items subtotal</span>
+          <span class="tally-value">KD ${itemsSubtotal.toFixed(3)}</span>
+        </div>
+        ${!isPickup ? `
+        <div class="tally-row">
+          <span class="tally-label">Delivery fee</span>
+          <span class="tally-value">KD ${deliveryFee.toFixed(3)}</span>
+        </div>` : ""}
+        ${discountRow}
+      </div>
+      <div class="tally-grand">
+        <span class="tally-grand-label">Total</span>
+        <span class="tally-grand-value">KD ${grandTotal.toFixed(3)}</span>
+      </div>
     </div>
-    <div>
-      <div class="label">Payment method</div>
-      <div class="value">${order.payment_method}</div>
-    </div>
-    <div>
-      <div class="label">Payment status</div>
-      <div class="value">${order.payment_status || "Pending"}</div>
-    </div>
-    ${order.delivery_rider_name ? `<div><div class="label">Delivery rider</div><div class="value">${order.delivery_rider_name}</div><div style="font-size:13px;color:#555;margin-top:2px">${order.delivery_rider_phone || ""}</div></div>` : ""}
-    ${order.notes ? `<div style="grid-column:1/-1"><div class="label">Order notes</div><div style="font-size:13px;color:#555;font-style:italic">${order.notes}</div></div>` : ""}
-    ${order.deliveryAddress ? `<div style="grid-column:1/-1"><div class="label">Delivery address</div><div style="font-size:13px;color:#555">${order.deliveryAddress}</div></div>` : ""}
+    ${
+      !isPickup && addrLine
+        ? `
+    <div class="section-heading"><span class="sh-text">📍 Delivery Address</span><div class="sh-line"></div></div>
+    <div class="info-card">
+      <div class="info-card-label">${deliveryAddr?.label || "Delivery address"}</div>
+      <div class="info-card-value">${addrLine}</div>
+      ${deliveryAddr?.note ? `<div class="info-card-sub">Note: ${deliveryAddr.note}</div>` : ""}
+    </div>`
+        : ""
+    }
   </div>
-  <hr class="divider">
-  <table>
-    <thead><tr><th>Qty</th><th>Item</th><th>Unit price</th><th>Total</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <div style="margin-top:20px;padding:16px 12px;background:#f9f6f2;border-radius:10px">
-    <div class="total-row"><span>Subtotal</span><span>KD ${Number(order.total_amount).toFixed(3)}</span></div>
-    <div class="total-row grand"><span>Total</span><span>KD ${Number(order.total_amount).toFixed(3)}</span></div>
+  <div class="footer">
+    <div class="footer-thank">Thank you for your order!</div>
+    <div class="footer-line"></div>
+    <div class="footer-sub">${restaurant?.name || "Restaurant"} · Powered by Ungrie</div>
+    <div class="print-meta">Printed ${now}</div>
   </div>
-  <div class="footer">Thank you for ordering from ${restaurant?.name || "us"}! · Powered by Ungrie</div>
-  <script>window.onload=()=>window.print()</script>
-  </body></html>`;
+</div>
+<script>window.onload=()=>window.print();</script>
+</body>
+</html>`;
 
   const w = window.open("", "_blank");
   if (w) {
@@ -4083,6 +8701,7 @@ function OrdersPage({ t, user }) {
   const [orderItems, setOrderItems] = useState([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [deliveryAddr, setDeliveryAddr] = useState(null); // fetched separately
+  const [orderDiscount, setOrderDiscount] = useState(null);
   const [mobileView, setMobileView] = useState("list");
 
   // Action modals
@@ -4104,7 +8723,7 @@ function OrdersPage({ t, user }) {
         .from("Orders")
         .select(
           `id, status, total_amount, payment_method, payment_status, notes, created_at,
-                 delivery_rider_name, delivery_rider_phone,
+                 delivery_rider_name, delivery_rider_phone, order_type,
                  cust_id, Customer(id, cust_name, ph_num)`,
         )
         .eq("rest_id", restId)
@@ -4188,6 +8807,30 @@ function OrdersPage({ t, user }) {
     }
   }, []);
 
+  // ── Fetch discount redemption for a specific order ─────────────────────────
+  const fetchOrderDiscount = useCallback(async (orderId) => {
+    setOrderDiscount(null);
+    if (!orderId) return;
+    try {
+      const { data } = await supabase
+        .from("Discount_Redemptions")
+        .select("id, amount_saved, discount_id, Discounts(code, type, value)")
+        .eq("order_id", orderId)
+        .maybeSingle();
+      if (data) {
+        setOrderDiscount({
+          code: data.Discounts?.code || "—",
+          type: data.Discounts?.type || "fixed",
+          value: data.Discounts?.value ?? 0,
+          amount_saved: Number(data.amount_saved || 0),
+        });
+      }
+    } catch (e) {
+      // Table may not exist yet — fail silently
+      console.warn("[fetchOrderDiscount]", e);
+    }
+  }, []);
+
   // ── Real-time subscription ─────────────────────────────────────────────────
   useEffect(() => {
     if (!restId) return;
@@ -4210,7 +8853,7 @@ function OrdersPage({ t, user }) {
             const { data } = await supabase
               .from("Orders")
               .select(
-                `id, status, total_amount, payment_method, payment_status, notes, created_at, delivery_rider_name, delivery_rider_phone, cust_id, Customer(id, cust_name, ph_num)`,
+                `id, status, total_amount, payment_method, payment_status, notes, created_at, delivery_rider_name, delivery_rider_phone, order_type, cust_id, Customer(id, cust_name, ph_num)`,
               )
               .eq("id", payload.new.id)
               .single();
@@ -4243,6 +8886,7 @@ function OrdersPage({ t, user }) {
     setMobileView("detail");
     fetchOrderItems(order.id);
     fetchDeliveryAddr(order.cust_id);
+    fetchOrderDiscount(order.id);
     setActionErr("");
   };
 
@@ -4253,6 +8897,7 @@ function OrdersPage({ t, user }) {
     preparing: orders.filter((o) => o.status === "preparing"),
     on_the_way: orders.filter((o) => o.status === "on_the_way"),
     history: orders.filter((o) => ["delivered", "rejected"].includes(o.status)),
+    cancelled: orders.filter((o) => o.status === "cancelled"),
   };
   const displayed = byStatus[orderTab] || [];
 
@@ -4298,6 +8943,9 @@ function OrdersPage({ t, user }) {
   // ── Reject order ───────────────────────────────────────────────────────────
   // (handled inside RejectOrderModal)
 
+  // ── Generic status update (used for pickup "ready" transition) ─────────────
+  const handleStatusUpdate = (status) => updateStatus(selectedOrder.id, status);
+
   // ── Send for delivery ──────────────────────────────────────────────────────
   // (handled inside DeliveryAssignModal)
 
@@ -4309,31 +8957,57 @@ function OrdersPage({ t, user }) {
     const meta = STATUS_META[order.status] || STATUS_META.pending;
     const custName = order.Customer?.cust_name || "Customer";
     const isSelected = selectedOrder?.id === order.id;
+    const isPickup = order.order_type === "pickup";
+
+    // Teal palette — works in both light and dark (t.surface2 is the dark alt surface)
+    const pickupBg   = isSelected ? t.accentBg  : (isPickup ? "#f0fdfa" : t.surface);
+    const pickupBdr  = isSelected ? t.accentBorder : (isPickup ? "#5eead4" : t.border);
+
     return (
       <button
         onClick={() => selectOrder(order)}
         style={{
-          background: isSelected ? t.accentBg : t.surface,
-          border: `1px solid ${isSelected ? t.accentBorder : t.border}`,
+          background: pickupBg,
+          border: `1px solid ${pickupBdr}`,
           textAlign: "left",
           width: "100%",
         }}
         className="rounded-xl p-3.5 transition-all duration-150 hover:shadow-sm active:scale-[0.98]"
       >
         <div className="flex items-center justify-between mb-1.5">
-          <span
-            style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
-            className="text-xs"
-          >
-            #{order.id}
-          </span>
+          {/* ID + optional pickup badge */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }}
+              className="text-xs flex-shrink-0"
+            >
+              #{order.id}
+            </span>
+            {isPickup && (
+              <span
+                style={{
+                  background: "#ccfbf1",
+                  color: "#0f766e",
+                  fontFamily: "'Lato', sans-serif",
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 99,
+                  letterSpacing: ".05em",
+                  flexShrink: 0,
+                }}
+              >
+                🏃 PICKUP
+              </span>
+            )}
+          </div>
           <span
             style={{
               background: meta.bg,
               color: meta.color,
               fontFamily: "'Lato', sans-serif",
             }}
-            className="text-xs font-bold px-2 py-0.5 rounded-full"
+            className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0"
           >
             {meta.label}
           </span>
@@ -4378,13 +9052,45 @@ function OrdersPage({ t, user }) {
     const isAccepted = selectedOrder.status === "accepted";
     const isPreparing = selectedOrder.status === "preparing";
     const isOnWay = selectedOrder.status === "on_the_way";
-    const isClosed = ["delivered", "rejected"].includes(selectedOrder.status);
+    const isCancelled = selectedOrder.status === "cancelled";
+    const isClosed = ["delivered", "rejected", "cancelled"].includes(selectedOrder.status);
+    const isPickupOrder = selectedOrder.order_type === "pickup";
 
     return (
       <div
-        style={{ background: t.surface, border: `1px solid ${t.border}` }}
+        style={{
+          background: t.surface,
+          border: `1px solid ${isPickupOrder ? "#5eead4" : t.border}`,
+        }}
         className="flex-1 flex flex-col rounded-xl overflow-hidden min-w-0"
       >
+        {/* Pickup banner */}
+        {isPickupOrder && (
+          <div
+            style={{
+              background: "#ccfbf1",
+              borderBottom: "1px solid #99f6e4",
+              padding: "7px 20px",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🏃</span>
+            <span
+              style={{
+                color: "#0f766e",
+                fontFamily: "'Lato', sans-serif",
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+              }}
+            >
+              Pickup order — customer will collect in person
+            </span>
+          </div>
+        )}
         {/* Header */}
         <div
           style={{ borderBottom: `1px solid ${t.border}` }}
@@ -4439,6 +9145,8 @@ function OrdersPage({ t, user }) {
                 },
                 orderItems,
                 null,
+                orderDiscount,
+                deliveryAddr,
               )
             }
             style={{
@@ -4504,9 +9212,10 @@ function OrdersPage({ t, user }) {
           {/* Bill summary */}
           <div
             style={{ borderBottom: `1px solid ${t.border}` }}
-            className="px-5 py-3 space-y-1"
+            className="px-5 py-3"
           >
-            <div className="flex justify-between text-sm">
+            {/* Payment row */}
+            <div className="flex justify-between text-sm mb-2">
               <span
                 style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
               >
@@ -4519,22 +9228,151 @@ function OrdersPage({ t, user }) {
                 {selectedOrder.payment_method}
               </span>
             </div>
-            <div
-              className="flex justify-between text-sm pt-1"
-              style={{ borderTop: `1px solid ${t.border}` }}
-            >
+
+            {/* Order type pill */}
+            <div className="flex justify-between items-center text-sm mb-2">
               <span
-                style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-                className="font-bold"
+                style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
               >
-                Total
+                Order type
               </span>
               <span
-                style={{ color: t.accent, fontFamily: "'Lato', sans-serif" }}
-                className="font-bold"
+                style={{
+                  fontFamily: "'Lato', sans-serif",
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: "2px 10px",
+                  borderRadius: 99,
+                  background: isPickupOrder ? "#ccfbf1" : "#eff6ff",
+                  color: isPickupOrder ? "#0f766e" : "#2563eb",
+                  letterSpacing: ".04em",
+                }}
               >
-                {fmtKD(selectedOrder.total_amount)}
+                {isPickupOrder ? "🏃 Pickup" : "🛵 Delivery"}
               </span>
+            </div>
+
+            {/* Breakdown rows */}
+            <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: 8 }}>
+              {/* Items subtotal — computed from loaded items */}
+              {!itemsLoading &&
+                orderItems.length > 0 &&
+                (() => {
+                  const itemsSubtotal = orderItems.reduce(
+                    (s, it) =>
+                      s +
+                      Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
+                    0,
+                  );
+                  return (
+                    <div className="flex justify-between text-sm mb-1.5">
+                      <span
+                        style={{
+                          color: t.subtle,
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                      >
+                        Items subtotal
+                      </span>
+                      <span
+                        style={{
+                          color: t.text,
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                        className="font-medium"
+                      >
+                        {fmtKD(itemsSubtotal)}
+                      </span>
+                    </div>
+                  );
+                })()}
+
+              {/* Delivery fee — only for delivery orders */}
+              {!isPickupOrder && (
+                <div className="flex justify-between text-sm mb-1.5">
+                  <span
+                    style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
+                  >
+                    Delivery fee
+                  </span>
+                  <span
+                    style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
+                    className="font-medium"
+                  >
+                    KD 0.500
+                  </span>
+                </div>
+              )}
+
+              {/* Discount — only shown when a redemption exists */}
+              {orderDiscount && orderDiscount.amount_saved > 0 && (
+                <div
+                  className="flex justify-between text-sm mb-1.5"
+                  style={{ alignItems: "center" }}
+                >
+                  <span
+                    style={{
+                      color: t.green,
+                      fontFamily: "'Lato', sans-serif",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    🏷️
+                    <span
+                      style={{
+                        background: t.greenBg,
+                        border: `1px solid ${t.greenBorder}`,
+                        color: t.green,
+                        borderRadius: 999,
+                        padding: "1px 8px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: ".04em",
+                      }}
+                    >
+                      {orderDiscount.code}
+                    </span>
+                    <span style={{ color: t.muted, fontSize: 11 }}>
+                      (
+                      {orderDiscount.type === "percentage"
+                        ? `${orderDiscount.value}% off`
+                        : `KD ${Number(orderDiscount.value).toFixed(3)} off`}
+                      )
+                    </span>
+                  </span>
+                  <span
+                    style={{
+                      color: t.green,
+                      fontFamily: "'Lato', sans-serif",
+                      fontWeight: 700,
+                    }}
+                  >
+                    −{fmtKD(orderDiscount.amount_saved)}
+                  </span>
+                </div>
+              )}
+
+              {/* Grand total */}
+              <div
+                className="flex justify-between text-sm pt-2"
+                style={{ borderTop: `1px solid ${t.border}` }}
+              >
+                <span
+                  style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
+                  className="font-bold"
+                >
+                  Total
+                </span>
+                <span
+                  style={{ color: t.accent, fontFamily: "'Lato', sans-serif" }}
+                  className="font-bold"
+                >
+                  {fmtKD(selectedOrder.total_amount)}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -4681,8 +9519,8 @@ function OrdersPage({ t, user }) {
             </div>
           )}
 
-          {/* Delivery rider info */}
-          {selectedOrder.delivery_rider_name && (
+          {/* Delivery rider info — delivery orders only */}
+          {!isPickupOrder && selectedOrder.delivery_rider_name && (
             <div
               style={{
                 borderBottom: `1px solid ${t.border}`,
@@ -4713,8 +9551,8 @@ function OrdersPage({ t, user }) {
             </div>
           )}
 
-          {/* Delivery address — fetched separately for reliability */}
-          {(() => {
+          {/* Delivery address — delivery orders only */}
+          {!isPickupOrder && (() => {
             const addr = deliveryAddr;
             if (!addr) return null;
             const addrLine = [
@@ -4803,6 +9641,27 @@ function OrdersPage({ t, user }) {
               </p>
             </div>
           )}
+
+          {/* Cancelled by customer notice */}
+          {isCancelled && (
+            <div
+              className="mx-5 my-3 px-4 py-3 rounded-lg"
+              style={{ background: "#FEF2F2", border: "1px solid #FECACA" }}
+            >
+              <p
+                style={{ color: "#B83232", fontFamily: "'Lato', sans-serif", fontWeight: 700 }}
+                className="text-sm mb-1"
+              >
+                ✕ Order Cancelled by Customer
+              </p>
+              <p
+                style={{ color: "#B83232", fontFamily: "'Lato', sans-serif", opacity: 0.8 }}
+                className="text-xs"
+              >
+                The customer cancelled this order before it was accepted. No action required.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Action footer */}
@@ -4877,17 +9736,24 @@ function OrdersPage({ t, user }) {
               <button
                 onClick={() => {
                   setActionErr("");
-                  setShowDeliveryModal(true);
-                  fetchRiders();
+                  if (isPickupOrder) {
+                    // For pickup: skip rider assignment, go straight to on_the_way (= ready)
+                    handleStatusUpdate("on_the_way");
+                  } else {
+                    setShowDeliveryModal(true);
+                    fetchRiders();
+                  }
                 }}
+                disabled={actionLoading}
                 style={{
-                  background: t.green,
+                  background: isPickupOrder ? "#0d9488" : t.green,
                   color: "#fff",
                   fontFamily: "'Lato', sans-serif",
+                  opacity: actionLoading ? 0.7 : 1,
                 }}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold hover:opacity-90 active:scale-95 transition-all"
               >
-                🛵 Send for Delivery
+                {actionLoading ? "…" : isPickupOrder ? "✅ Mark Ready for Pickup" : "🛵 Send for Delivery"}
               </button>
             )}
             {isOnWay && (
@@ -4902,7 +9768,7 @@ function OrdersPage({ t, user }) {
                 }}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold hover:opacity-90 active:scale-95 transition-all"
               >
-                {actionLoading ? "…" : "✅ Mark Delivered"}
+                {actionLoading ? "…" : isPickupOrder ? "✅ Mark Collected" : "✅ Mark Delivered"}
               </button>
             )}
           </div>
@@ -4918,6 +9784,7 @@ function OrdersPage({ t, user }) {
     { id: "preparing", label: "Preparing", color: "#7C3AED" },
     { id: "on_the_way", label: "On Way", color: t.green },
     { id: "history", label: "History", color: t.muted },
+    { id: "cancelled", label: "Cancelled", color: "#B83232" },
   ];
 
   const TabStrip = () => (
@@ -9160,6 +14027,548 @@ function MenuPage({ t, user }) {
   );
 }
 
+// ─── CancellationsPage ────────────────────────────────────────────────────────
+function CancellationsPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    if (!restId) { setLoading(false); return; }
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("Orders")
+          .select(
+            `id, status, total_amount, payment_method, payment_status, notes, created_at,
+             order_type, cust_id, Customer(id, cust_name, ph_num)`
+          )
+          .eq("rest_id", restId)
+          .eq("status", "cancelled")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        setOrders(data || []);
+      } catch (e) {
+        console.error("[CancellationsPage]", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [restId]);
+
+  // Realtime: pick up newly cancelled orders live
+  useEffect(() => {
+    if (!restId) return;
+    const ch = supabase
+      .channel(`cancellations-${restId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Orders",
+          filter: `rest_id=eq.${restId}`,
+        },
+        (payload) => {
+          if (payload.new?.status === "cancelled") {
+            setOrders((prev) => {
+              if (prev.find((o) => o.id === payload.new.id)) return prev;
+              return [{ ...payload.new }, ...prev];
+            });
+          }
+        },
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [restId]);
+
+  const filtered = orders.filter((o) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      String(o.id).includes(q) ||
+      (o.Customer?.cust_name || "").toLowerCase().includes(q) ||
+      (o.Customer?.ph_num || "").includes(q) ||
+      (o.payment_method || "").toLowerCase().includes(q)
+    );
+  });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  return (
+    <div style={{ padding: "20px 24px 40px" }}>
+      <style>{`
+        .cancel-table { width: 100%; border-collapse: collapse; min-width: 700px; }
+        .cancel-table th { padding: 13px 16px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; font-family: 'Lato', sans-serif; }
+        .cancel-table td { padding: 13px 16px; font-size: 13px; vertical-align: middle; border-bottom: 1px solid; white-space: nowrap; font-family: 'Lato', sans-serif; }
+        .cancel-table tr:last-child td { border-bottom: none; }
+        .cancel-table tbody tr:hover td { filter: brightness(0.97); }
+        @media(max-width:640px){ .cancel-table th, .cancel-table td { padding: 10px 11px; font-size: 12px; } }
+      `}</style>
+
+      {/* Header */}
+      <h1
+        style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text }}
+        className="text-3xl md:text-4xl font-bold tracking-tight mb-1"
+      >
+        Cancellations
+      </h1>
+      <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, marginBottom: 20 }}>
+        Orders cancelled by customers before being accepted.
+      </p>
+
+      {/* Search */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 260px", minWidth: 0 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", opacity: 0.4, fontSize: 14 }}>
+            🔍
+          </span>
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+            placeholder="Search Table...."
+            style={{
+              width: "100%",
+              paddingLeft: 36,
+              paddingRight: 14,
+              paddingTop: 10,
+              paddingBottom: 10,
+              background: t.surface2,
+              border: `1px solid ${t.border2}`,
+              color: t.text,
+              fontFamily: "'Lato', sans-serif",
+              borderRadius: 8,
+              fontSize: 13,
+              boxSizing: "border-box",
+              outline: "none",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading cancellations…</p>
+      ) : (
+        <>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: 12, border: `1px solid ${t.border}` }}>
+            <table className="cancel-table">
+              <thead>
+                <tr style={{ background: t.text }}>
+                  <th style={{ color: "#fff" }}>Order ID</th>
+                  <th style={{ color: "#fff" }}>Order Type</th>
+                  <th style={{ color: "#fff" }}>Ordered On</th>
+                  <th style={{ color: "#fff" }}>Phone No.</th>
+                  <th style={{ color: "#fff" }}>Customer Name</th>
+                  <th style={{ color: "#fff" }}>Payment Mode</th>
+                  <th style={{ color: "#fff" }}>Status</th>
+                  <th style={{ color: "#fff" }}>Bill Total</th>
+                  <th style={{ color: "#fff" }}>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      style={{
+                        color: t.muted,
+                        textAlign: "center",
+                        padding: "40px 14px",
+                        fontFamily: "'Lato', sans-serif",
+                        fontSize: 13,
+                      }}
+                    >
+                      {search ? "No cancellations match your search." : "No results."}
+                    </td>
+                  </tr>
+                ) : (
+                  paginated.map((o) => (
+                    <tr key={o.id}>
+                      <td style={{ color: t.text, fontWeight: 700, borderBottomColor: t.border }}>
+                        #{o.id}
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        Delivery
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        {fmtDate(o.created_at)}
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        {o.Customer?.ph_num || "—"}
+                      </td>
+                      <td style={{ color: t.text, fontWeight: 600, borderBottomColor: t.border }}>
+                        {o.Customer?.cust_name || "—"}
+                      </td>
+                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
+                        {o.payment_method || "—"}
+                      </td>
+                      <td style={{ borderBottomColor: t.border }}>
+                        <span
+                          style={{
+                            background: "rgba(184,50,50,0.08)",
+                            color: "#B83232",
+                            fontFamily: "'Lato', sans-serif",
+                            fontWeight: 700,
+                            fontSize: 11,
+                            padding: "3px 10px",
+                            borderRadius: 99,
+                          }}
+                        >
+                          Cancelled
+                        </span>
+                      </td>
+                      <td style={{ color: t.accent, fontWeight: 700, borderBottomColor: t.border }}>
+                        {fmtKD(o.total_amount)}
+                      </td>
+                      <td style={{ borderBottomColor: t.border }}>
+                        <CancelOrderDetailButton order={o} t={t} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              style={{
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: page === 0 ? t.muted : t.text,
+                fontFamily: "'Lato', sans-serif",
+                fontWeight: 600,
+                fontSize: 13,
+                padding: "8px 18px",
+                borderRadius: 8,
+                cursor: page === 0 ? "not-allowed" : "pointer",
+                opacity: page === 0 ? 0.6 : 1,
+              }}
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              style={{
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                color: page >= totalPages - 1 ? t.muted : t.text,
+                fontFamily: "'Lato', sans-serif",
+                fontWeight: 600,
+                fontSize: 13,
+                padding: "8px 18px",
+                borderRadius: 8,
+                cursor: page >= totalPages - 1 ? "not-allowed" : "pointer",
+                opacity: page >= totalPages - 1 ? 0.6 : 1,
+              }}
+            >
+              Next
+            </button>
+          </div>
+
+          {filtered.length > 0 && (
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 8, textAlign: "right" }}>
+              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length} cancellation{filtered.length !== 1 ? "s" : ""}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── CancelOrderDetailButton — portal-based modal with full price breakdown ────
+function CancelOrderDetailButton({ order, t }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState([]);
+  const [discount, setDiscount] = useState(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [fetched, setFetched] = useState(false);
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (open) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
+  const loadData = async () => {
+    if (fetched) { setOpen(true); return; }
+    setLoadingItems(true);
+    try {
+      const [itemsRes, discountRes] = await Promise.all([
+        supabase
+          .from("Order_Items")
+          .select("id, quantity, unit_price, subtotal, item_note, Menu(name)")
+          .eq("order_id", order.id),
+        supabase
+          .from("Discount_Redemptions")
+          .select("amount_saved, Discounts(code, type, value)")
+          .eq("order_id", order.id)
+          .maybeSingle(),
+      ]);
+      setItems(itemsRes.data || []);
+      if (discountRes.data) {
+        setDiscount({
+          code: discountRes.data.Discounts?.code || "—",
+          type: discountRes.data.Discounts?.type || "fixed",
+          value: discountRes.data.Discounts?.value ?? 0,
+          amount_saved: Number(discountRes.data.amount_saved || 0),
+        });
+      }
+      setFetched(true);
+      setOpen(true);
+    } catch (e) {
+      console.error("[CancelOrderDetail]", e);
+      setFetched(true);
+      setOpen(true);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  // Computed bill values
+  const itemsSubtotal = items.reduce(
+    (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0), 0
+  );
+  const deliveryFee = 0.5;
+  const discountAmt = discount?.amount_saved ?? 0;
+
+  const modal = open ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+        background: "rgba(0,0,0,0.52)",
+        backdropFilter: "blur(5px)",
+        WebkitBackdropFilter: "blur(5px)",
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+    >
+      <div
+        style={{
+          background: t.surface,
+          border: `1px solid ${t.border}`,
+          borderRadius: 16,
+          padding: 24,
+          width: "min(500px, calc(100vw - 32px))",
+          maxHeight: "85vh",
+          overflowY: "auto",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.28)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── Header ── */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
+          <div>
+            <p style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 22, fontWeight: 800, lineHeight: 1.1 }}>
+              Order #{order.id}
+            </p>
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 3 }}>
+              {fmtDate(order.created_at)}
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <span style={{
+              background: "rgba(184,50,50,0.10)",
+              color: "#B83232",
+              border: "1px solid rgba(184,50,50,0.25)",
+              fontFamily: "'Lato', sans-serif",
+              fontWeight: 700,
+              fontSize: 11,
+              padding: "4px 11px",
+              borderRadius: 99,
+              letterSpacing: ".04em",
+            }}>
+              Cancelled
+            </span>
+            <button
+              onClick={() => setOpen(false)}
+              style={{
+                background: t.surface2,
+                border: `1px solid ${t.border2}`,
+                borderRadius: 8,
+                cursor: "pointer",
+                color: t.muted,
+                fontSize: 16,
+                lineHeight: 1,
+                width: 30,
+                height: 30,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* ── Customer ── */}
+        <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 }}>
+          <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 7 }}>Customer</p>
+          <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+            {order.Customer?.cust_name || "—"}
+          </p>
+          <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+            {order.Customer?.ph_num || "—"}
+          </p>
+        </div>
+
+        {/* ── Items ── */}
+        <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>Items</p>
+        {loadingItems ? (
+          <p style={{ color: t.muted, fontSize: 13, fontFamily: "'Lato', sans-serif", marginBottom: 18 }}>Loading…</p>
+        ) : items.length === 0 ? (
+          <p style={{ color: t.muted, fontSize: 13, fontFamily: "'Lato', sans-serif", marginBottom: 18 }}>No items recorded.</p>
+        ) : (
+          <div style={{ marginBottom: 18, border: `1px solid ${t.border}`, borderRadius: 10, overflow: "hidden" }}>
+            {items.map((it, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  padding: "11px 14px",
+                  borderBottom: i < items.length - 1 ? `1px solid ${t.border}` : "none",
+                  background: t.surface,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13, marginBottom: it.item_note ? 3 : 0 }}>
+                    ×{it.quantity} {it.Menu?.name || "Item"}
+                  </p>
+                  {it.item_note && (
+                    <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, fontStyle: "italic" }}>📝 {it.item_note}</p>
+                  )}
+                </div>
+                <p style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
+                  {fmtKD(it.subtotal ?? it.unit_price * it.quantity)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Bill Summary ── */}
+        <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>Bill Summary</p>
+        <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: order.notes ? 16 : 0 }}>
+          {/* Payment method */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, marginBottom: 10, borderBottom: `1px solid ${t.border}` }}>
+            <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Payment method</span>
+            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 600, fontSize: 13 }}>
+              {order.payment_method || "—"}
+            </span>
+          </div>
+
+          {/* Items subtotal */}
+          {!loadingItems && items.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Items subtotal</span>
+              <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(itemsSubtotal)}</span>
+            </div>
+          )}
+
+          {/* Delivery fee */}
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: discountAmt > 0 ? 8 : 0 }}>
+            <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Delivery fee</span>
+            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(deliveryFee)}</span>
+          </div>
+
+          {/* Discount row — only if coupon was applied */}
+          {discount && discountAmt > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, color: t.green, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                🏷️
+                <span style={{
+                  background: t.greenBg,
+                  border: `1px solid ${t.greenBorder}`,
+                  color: t.green,
+                  borderRadius: 999,
+                  padding: "1px 8px",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: ".04em",
+                  fontFamily: "'Lato', sans-serif",
+                }}>
+                  {discount.code}
+                </span>
+                <span style={{ color: t.muted, fontSize: 11, fontFamily: "'Lato', sans-serif" }}>
+                  ({discount.type === "percentage" ? `${discount.value}% off` : `KD ${Number(discount.value).toFixed(3)} off`})
+                </span>
+              </span>
+              <span style={{ color: t.green, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 13 }}>
+                −{fmtKD(discountAmt)}
+              </span>
+            </div>
+          )}
+
+          {/* Grand total */}
+          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 12, borderTop: `1px solid ${t.border}`, marginTop: 12 }}>
+            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 15 }}>Total</span>
+            <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 800, fontSize: 16 }}>{fmtKD(order.total_amount)}</span>
+          </div>
+        </div>
+
+        {/* ── Order Note ── */}
+        {order.notes && (
+          <div style={{ marginTop: 16, padding: "11px 14px", background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 10 }}>
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 5 }}>Order Note</p>
+            <p style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontSize: 13, fontStyle: "italic" }}>"{order.notes}"</p>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <button
+        onClick={() => open ? setOpen(false) : loadData()}
+        style={{
+          background: t.accentBg,
+          border: `1px solid ${t.accentBorder}`,
+          color: t.accent,
+          fontFamily: "'Lato', sans-serif",
+          fontWeight: 600,
+          fontSize: 12,
+          padding: "5px 14px",
+          borderRadius: 6,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {loadingItems ? "…" : "View"}
+      </button>
+      {typeof document !== "undefined" && createPortal(modal, document.body)}
+    </>
+  );
+}
+
 // ─── Root Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard({ user, onLogout }) {
   const [activeNav, setActiveNav] = useState("home");
@@ -9172,6 +14581,51 @@ export default function Dashboard({ user, onLogout }) {
 
   const t = darkMode ? DARK : LIGHT;
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+
+  // ── Load accept_delivery / accept_pickup from DB on mount ──────────────────
+  useEffect(() => {
+    if (!restId) return;
+    supabase
+      .from("Restaurants")
+      .select("accept_delivery, accept_pickup")
+      .eq("id", restId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) return; // columns may not exist yet; fail silently
+        setDelivery(data.accept_delivery ?? true);
+        setPickup(data.accept_pickup ?? true);
+      })
+      .catch(() => {}); // network error — keep defaults
+  }, [restId]);
+
+  // ── Persist toggle changes to DB ───────────────────────────────────────────
+  const handleDeliveryToggle = async (val) => {
+    setDelivery(val);
+    try {
+      const { error } = await supabase
+        .from("Restaurants")
+        .update({ accept_delivery: val })
+        .eq("id", restId);
+      if (error) throw error;
+    } catch (e) {
+      console.error("[Dashboard] save accept_delivery:", e);
+      setDelivery(!val); // revert optimistic update
+    }
+  };
+
+  const handlePickupToggle = async (val) => {
+    setPickup(val);
+    try {
+      const { error } = await supabase
+        .from("Restaurants")
+        .update({ accept_pickup: val })
+        .eq("id", restId);
+      if (error) throw error;
+    } catch (e) {
+      console.error("[Dashboard] save accept_pickup:", e);
+      setPickup(!val); // revert optimistic update
+    }
+  };
 
   // Live order counts for header badges
   useEffect(() => {
@@ -9220,10 +14674,14 @@ export default function Dashboard({ user, onLogout }) {
         return <DeliveryPage t={t} user={user} />;
       case "customers":
         return <CustomersPage t={t} user={user} />;
+      case "broadcast":
+        return <BroadcastPage t={t} user={user} />;
       case "menu":
         return <MenuPage t={t} user={user} />;
       case "discounts":
         return <DiscountsPage t={t} user={user} />;
+      case "cancellations":
+        return <CancellationsPage t={t} user={user} />;
       default:
         return (
           <div className="p-8 flex items-center justify-center min-h-[50vh]">
@@ -9347,7 +14805,7 @@ export default function Dashboard({ user, onLogout }) {
             >
               Delivery
             </span>
-            <Toggle value={delivery} onChange={setDelivery} t={t} />
+            <Toggle value={delivery} onChange={handleDeliveryToggle} t={t} />
           </div>
           <div
             style={{ background: t.surface2, border: `1px solid ${t.border2}` }}
@@ -9359,7 +14817,7 @@ export default function Dashboard({ user, onLogout }) {
             >
               Pickup
             </span>
-            <Toggle value={pickup} onChange={setPickup} t={t} />
+            <Toggle value={pickup} onChange={handlePickupToggle} t={t} />
           </div>
           <ThemeBtn
             dark={darkMode}

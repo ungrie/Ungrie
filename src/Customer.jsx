@@ -1,11 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient";
-import './index.css';
+import "./index.css";
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 const fmt = (n) => `KD ${Number(n || 0).toFixed(3)}`;
-const getRestId = () =>
-  new URLSearchParams(window.location.search).get("rest_id");
+
+/**
+ * Reads the URL for either:
+ *   ?r=<slug>          ← preferred (new style)
+ *   ?rest_id=<id>      ← legacy numeric fallback
+ * Returns { slug, legacyId } — one will be set, the other null.
+ */
+const getRestParam = () => {
+  const p = new URLSearchParams(window.location.search);
+  const slug = p.get("r") || null;
+  const legacyId = p.get("rest_id") || null;
+  return { slug, legacyId };
+};
+
 // Key is per-restaurant so returning users of restaurant A don't auto-login at restaurant B
 const custKey = (restId) => `frt_cust_${restId}`;
 
@@ -268,31 +280,35 @@ const Ic = {
 
 /* ── global CSS ───────────────────────────────────────────────────────────── */
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap');
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --orange:#ff5200;
   --orange-d:#e04800;
+  --orange-l:rgba(255,82,0,.08);
   --green:#1e8c45;
   --green-l:#e8f5ee;
   --red:#e53935;
   --red-l:#fdecea;
   --yellow:#f59e0b;
-  --bg:#f2f2f7;
+  --bg:#f4f3f0;
   --card:#ffffff;
-  --border:#ebebeb;
-  --t1:#1a1a1a;
-  --t2:#6b6b6b;
-  --t3:#aeaeb2;
-  --font:'Plus Jakarta Sans',system-ui,sans-serif;
-  --nav-h:60px;
-  --tab-h:64px;
-  --r:16px;
-  --r-sm:10px;
+  --border:#e8e5e0;
+  --border-strong:#d0ccc5;
+  --t1:#1a1714;
+  --t2:#6b6660;
+  --t3:#b0ada8;
+  --font:'DM Sans',system-ui,sans-serif;
+  --font-display:'Playfair Display',serif;
+  --nav-h:62px;
+  --tab-h:66px;
+  --r:18px;
+  --r-sm:12px;
   --r-pill:100px;
-  --shadow:0 2px 16px rgba(0,0,0,.09);
-  --shadow-lg:0 8px 40px rgba(0,0,0,.14);
+  --shadow:0 2px 20px rgba(0,0,0,.07);
+  --shadow-lg:0 12px 48px rgba(0,0,0,.13);
+  --shadow-orange:0 6px 24px rgba(255,82,0,.22);
 }
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;height:100%}
 body{font-family:var(--font);background:var(--bg);color:var(--t1);-webkit-font-smoothing:antialiased;min-height:100dvh;overscroll-behavior:none}
@@ -308,13 +324,16 @@ a{text-decoration:none}
 @keyframes scaleUp{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
-@keyframes popBadge{0%,100%{transform:scale(1)}50%{transform:scale(1.3)}}
+@keyframes popBadge{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
 @keyframes toast{0%{transform:translate(-50%,10px);opacity:0}15%,85%{transform:translate(-50%,0);opacity:1}100%{transform:translate(-50%,-4px);opacity:0}}
+@keyframes heroSlide{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:scale(1)}}
+@keyframes heroTextIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes dotPulse{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.4);opacity:1}}
+@keyframes cardIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ripple{from{transform:scale(0);opacity:.5}to{transform:scale(2.5);opacity:0}}
 
-/* ── overlay + sheet (shared by all bottom panels) ── */
-.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.48);backdrop-filter:blur(2px);animation:fadeIn .2s ease}
-
-/* Mobile: slide up from bottom */
+/* ── overlay + sheet ── */
+.overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.52);backdrop-filter:blur(3px);animation:fadeIn .2s ease}
 .sheet{
   position:fixed;bottom:0;left:0;right:0;z-index:301;
   background:var(--card);border-radius:var(--r) var(--r) 0 0;
@@ -322,141 +341,165 @@ a{text-decoration:none}
   animation:slideUp .32s cubic-bezier(.34,1.1,.64,1);
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
-
-/* Desktop: fixed center — no bottom/transform collision */
 @media(min-width:600px){
   .sheet{
     bottom:auto;top:50%;left:50%;
-    width:min(520px,92vw);
-    margin:0;
-    /* Use margin-top trick so transform is only translateX(-50%) translateY(-50%), stable from the start */
+    width:min(520px,92vw);margin:0;
     transform:translate(-50%,-50%);
-    border-radius:var(--r);
-    max-height:90dvh;
-    animation:sheetDesktop .2s cubic-bezier(.22,1,.36,1);
+    border-radius:var(--r);max-height:90dvh;
+    animation:sheetDesktop .22s cubic-bezier(.22,1,.36,1);
   }
 }
 @keyframes sheetDesktop{
-  from{opacity:0;transform:translate(-50%,-50%) scale(.96)}
+  from{opacity:0;transform:translate(-50%,-50%) scale(.95)}
   to{opacity:1;transform:translate(-50%,-50%) scale(1)}
 }
-.drag-pill{width:40px;height:4px;background:var(--border);border-radius:99px;margin:12px auto 0}
+.drag-pill{width:36px;height:3px;background:var(--border);border-radius:99px;margin:14px auto 0}
 
 /* ── spinner ── */
 .spin{display:inline-block;width:24px;height:24px;border:2.5px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .65s linear infinite}
 
 /* ── skeleton ── */
-.skel{background:linear-gradient(90deg,#f0f0f0 25%,#e8e8e8 50%,#f0f0f0 75%);background-size:400px 100%;animation:shimmer 1.4s infinite;border-radius:var(--r-sm)}
+.skel{background:linear-gradient(90deg,#eeebe7 25%,#e5e2de 50%,#eeebe7 75%);background-size:400px 100%;animation:shimmer 1.4s infinite;border-radius:var(--r-sm)}
 
 /* ── toast ── */
 .toast{
-  position:fixed;bottom:calc(var(--tab-h) + 12px);left:50%;
-  background:#1a1a1a;color:#fff;
-  padding:10px 20px;border-radius:var(--r-pill);
+  position:fixed;bottom:calc(var(--tab-h) + 14px);left:50%;
+  background:#1a1714;color:#fff;
+  padding:11px 22px;border-radius:var(--r-pill);
   font-size:13px;font-weight:600;z-index:9999;white-space:nowrap;
   animation:toast 2.6s ease forwards;pointer-events:none;
-  box-shadow:var(--shadow-lg);
+  box-shadow:var(--shadow-lg);letter-spacing:.01em;
 }
-@media(min-width:1024px){.toast{bottom:24px}}
+@media(min-width:1024px){.toast{bottom:28px}}
 
 /* ── top nav ── */
 .topnav{
   position:sticky;top:0;z-index:100;height:var(--nav-h);
   width:100%;
-  background:rgba(255,255,255,.96);backdrop-filter:blur(20px);
+  background:rgba(255,255,255,.97);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
   border-bottom:1px solid var(--border);
-  display:flex;align-items:center;padding:0 16px;gap:10px;
+  display:flex;align-items:center;padding:0 18px;gap:12px;
   box-sizing:border-box;
 }
+
 /* ── bottom tab bar (mobile only) ── */
 .tabbar{
   position:fixed;bottom:0;left:0;right:0;z-index:100;
-  height:var(--tab-h);background:var(--card);
-  border-top:1px solid var(--border);
+  height:var(--tab-h);background:rgba(255,255,255,.98);
+  border-top:1px solid var(--border);backdrop-filter:blur(20px);
   display:grid;grid-template-columns:repeat(3,1fr);
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
 @media(min-width:1024px){.tabbar{display:none}}
-.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:var(--t3);font-size:11px;font-weight:600;transition:color .15s}
+.tab-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:var(--t3);font-size:10.5px;font-weight:600;transition:color .15s}
 .tab-item.on{color:var(--orange)}
 .tab-badge{position:absolute;top:-2px;right:-8px;background:var(--orange);color:#fff;border-radius:99px;min-width:16px;height:16px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:popBadge .25s ease}
 
-/* ── hero ── */
-.hero{position:relative;width:100%;background:#111;overflow:hidden}
-.hero img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
-.hero-grad{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.78) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}
-.hero-content{position:absolute;bottom:0;left:0;right:0;padding:16px 16px 20px;color:#fff}
+/* ── hero / slideshow ── */
+.hero{position:relative;width:100%;background:#1a1714;overflow:hidden}
+.hero-slide{position:absolute;inset:0;transition:opacity .9s cubic-bezier(.4,0,.2,1)}
+.hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
+.hero-slide-active{opacity:1;animation:heroSlide .9s cubic-bezier(.4,0,.2,1) forwards}
+.hero-slide-inactive{opacity:0}
+.hero-grad{position:absolute;inset:0;background:linear-gradient(175deg,rgba(0,0,0,.08) 0%,rgba(0,0,0,.28) 45%,rgba(0,0,0,.82) 100%)}
+.hero-content{position:absolute;bottom:0;left:0;right:0;padding:20px 20px 24px;color:#fff}
+.hero-title{font-family:var(--font-display);font-size:clamp(20px,5vw,30px);font-weight:800;line-height:1.15;margin-bottom:10px;animation:heroTextIn .6s .15s both}
+.hero-meta{display:flex;flex-wrap:wrap;gap:6px 14px;animation:heroTextIn .6s .28s both}
+.hero-meta-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:rgba(255,255,255,.85);background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:4px 11px;border-radius:var(--r-pill);backdrop-filter:blur(6px)}
+.hero-dots{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:5px;z-index:5}
+.hero-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.45);transition:all .3s;cursor:pointer;border:none}
+.hero-dot.on{background:#fff;width:18px;border-radius:3px}
+.hero-open-label{position:absolute;top:14px;left:14px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);backdrop-filter:blur(8px);color:#fff;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:5px 12px;border-radius:var(--r-pill);animation:heroTextIn .4s .05s both}
 
 /* ── search bar ── */
 .search-bar{
   display:flex;align-items:center;gap:10px;
-  background:var(--card);border:1.5px solid var(--border);
-  border-radius:var(--r-pill);padding:0 16px;height:46px;
-  transition:border-color .15s,box-shadow .15s;
+  background:var(--bg);border:1.5px solid var(--border);
+  border-radius:var(--r-pill);padding:0 18px;height:48px;
+  transition:border-color .2s,box-shadow .2s,background .2s;
 }
-.search-bar:focus-within{border-color:#aaa;box-shadow:0 0 0 3px rgba(0,0,0,.06)}
-.search-bar input{flex:1;font-size:14px;color:var(--t1);border:none;background:none}
+.search-bar:focus-within{border-color:var(--border-strong);background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.search-bar input{flex:1;font-size:14px;color:var(--t1);border:none;background:none;font-weight:500}
 .search-bar input::placeholder{color:var(--t3)}
 
 /* ── category strip ── */
 .cat-strip{display:flex;gap:8px;overflow-x:auto;padding:14px 16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.cat-chip{flex-shrink:0;padding:7px 16px;border-radius:var(--r-pill);border:1.5px solid var(--border);background:var(--card);color:var(--t2);font-size:13px;font-weight:600;white-space:nowrap;transition:all .15s;cursor:pointer}
-.cat-chip:hover{border-color:#bbb;color:var(--t1)}
-.cat-chip.on{background:var(--t1);color:#fff;border-color:var(--t1)}
+.cat-chip{
+  flex-shrink:0;padding:8px 18px;border-radius:var(--r-pill);
+  border:1.5px solid var(--border);background:var(--card);
+  color:var(--t2);font-size:13px;font-weight:600;white-space:nowrap;
+  transition:all .18s;cursor:pointer;letter-spacing:.01em;
+}
+.cat-chip:hover{border-color:var(--border-strong);color:var(--t1)}
+.cat-chip.on{background:var(--t1);color:#fff;border-color:var(--t1);box-shadow:0 2px 10px rgba(0,0,0,.15)}
 
 /* ── menu section ── */
 .section-hd{display:flex;align-items:center;justify-content:space-between;padding:4px 16px 12px}
-.section-title{font-size:16px;font-weight:700;color:var(--t1)}
+.section-title{font-size:17px;font-weight:800;color:var(--t1);font-family:var(--font-display)}
 .section-count{font-size:12px;font-weight:600;color:var(--t3)}
 
-/* ── menu card (default: swiggy-style list) ── */
+/* ── menu card ── */
 .menu-card{
   display:flex;align-items:flex-start;gap:14px;
-  background:var(--card);padding:16px;
+  background:var(--card);padding:16px 16px 14px;
   border-bottom:1px solid var(--border);
   cursor:pointer;position:relative;
-  transition:background .12s;
+  transition:background .15s;
 }
 .menu-card:last-child{border-bottom:none}
-.menu-card:active{background:#fafafa}
-.menu-thumb{width:96px;height:96px;border-radius:var(--r-sm);overflow:hidden;background:#f0f0f0;flex-shrink:0;position:relative}
-.menu-thumb img{width:100%;height:100%;object-fit:cover}
-.menu-thumb-empty{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:38px;color:var(--t3)}
+.menu-card:hover{background:#fdfcfb}
+.menu-card:active{background:#f9f8f6}
+.menu-thumb{
+  width:100px;height:100px;border-radius:14px;
+  overflow:hidden;background:#f0ede8;flex-shrink:0;position:relative;
+  box-shadow:0 2px 10px rgba(0,0,0,.08);
+}
+.menu-thumb img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
+.menu-card:hover .menu-thumb img{transform:scale(1.04)}
+.menu-thumb-empty{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:40px;color:var(--t3)}
 .menu-info{flex:1;min-width:0;padding-top:2px}
-.menu-name{font-size:14px;font-weight:700;color:var(--t1);line-height:1.3;margin-bottom:4px}
-.menu-desc{font-size:12.5px;color:var(--t2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}
-.menu-price{font-size:14.5px;font-weight:800;color:var(--t1)}
-.menu-popular{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:#e65c00;background:#fff3e0;padding:2px 7px;border-radius:4px;margin-bottom:5px}
+.menu-name{font-size:14.5px;font-weight:700;color:var(--t1);line-height:1.35;margin-bottom:4px;letter-spacing:-.01em}
+.menu-desc{font-size:12.5px;color:var(--t2);line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:9px}
+.menu-price{font-size:15px;font-weight:800;color:var(--t1);letter-spacing:-.01em}
+.menu-popular{
+  display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;
+  color:#c44d00;background:linear-gradient(135deg,#fff3e0,#ffe8cc);
+  padding:3px 8px;border-radius:5px;margin-bottom:6px;letter-spacing:.02em;
+  border:1px solid rgba(196,77,0,.15);
+}
 .menu-oos{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;color:var(--red);background:var(--red-l);padding:2px 8px;border-radius:4px;margin-left:6px}
 
 /* ── add button ── */
 .add-btn{
-  position:absolute;bottom:12px;right:12px;
-  width:32px;height:32px;border-radius:var(--r-sm);
-  background:var(--card);border:1.5px solid var(--orange);
+  position:absolute;bottom:14px;right:14px;
+  width:34px;height:34px;border-radius:10px;
+  background:#fff;border:1.5px solid var(--orange);
   color:var(--orange);display:flex;align-items:center;justify-content:center;
-  transition:all .15s;font-weight:800;box-shadow:0 2px 8px rgba(255,82,0,.15);
+  transition:all .18s;font-weight:800;
+  box-shadow:0 2px 10px rgba(255,82,0,.18);
 }
-.add-btn:hover{background:var(--orange);color:#fff}
+.add-btn:hover{background:var(--orange);color:#fff;transform:scale(1.08);box-shadow:var(--shadow-orange)}
+.add-btn:active{transform:scale(.96)}
 /* counter pill */
 .qty-pill{
-  position:absolute;bottom:12px;right:12px;
+  position:absolute;bottom:14px;right:14px;
   display:inline-flex;align-items:center;
-  background:var(--orange);border-radius:var(--r-sm);
-  overflow:hidden;height:32px;box-shadow:0 2px 8px rgba(255,82,0,.25);
+  background:var(--orange);border-radius:10px;
+  overflow:hidden;height:34px;box-shadow:var(--shadow-orange);
 }
-.qty-pill button{width:32px;height:32px;color:#fff;display:flex;align-items:center;justify-content:center;transition:background .12s}
+.qty-pill button{width:32px;height:34px;color:#fff;display:flex;align-items:center;justify-content:center;transition:background .12s}
 .qty-pill button:hover{background:rgba(255,255,255,.2)}
 .qty-pill span{min-width:26px;text-align:center;font-size:13px;font-weight:800;color:#fff}
 
 /* ── sheet header ── */
-.sheet-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px}
-.sheet-title{font-size:18px;font-weight:800;color:var(--t1)}
-.close-btn{width:32px;height:32px;border-radius:50%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--t2);transition:background .12s}
-.close-btn:hover{background:#ebebeb}
+.sheet-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 12px}
+.sheet-title{font-size:18px;font-weight:800;color:var(--t1);letter-spacing:-.02em}
+.close-btn{width:34px;height:34px;border-radius:50%;background:#f5f3f0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--t2);transition:all .15s}
+.close-btn:hover{background:#eceae6;color:var(--t1)}
 
 /* ── item detail sheet ── */
-.item-img-wrap{width:100%;aspect-ratio:4/3;overflow:hidden;background:#f0f0f0;position:relative;max-height:280px}
+.item-img-wrap{width:100%;aspect-ratio:4/3;overflow:hidden;background:#f0ede8;position:relative;max-height:280px}
 .item-img-wrap img{width:100%;height:100%;object-fit:cover}
 .item-img-empty{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:72px;color:var(--t3)}
 
@@ -466,8 +509,8 @@ a{text-decoration:none}
   padding:13px 16px;border:1.5px solid var(--border);border-radius:var(--r-sm);
   cursor:pointer;transition:all .15s;
 }
-.var-opt:hover{border-color:#bbb}
-.var-opt.sel{border-color:var(--t1);background:#fafafa}
+.var-opt:hover{border-color:var(--border-strong)}
+.var-opt.sel{border-color:var(--t1);background:#fafaf8}
 .var-dot{width:20px;height:20px;border-radius:50%;border:2px solid var(--border);transition:all .15s;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .var-dot.sq{border-radius:5px}
 .var-dot.sel{border-color:var(--t1);background:var(--t1)}
@@ -477,11 +520,11 @@ a{text-decoration:none}
 .cart-row:last-child{border-bottom:none}
 
 /* ── checkout ── */
-.addr-card{border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;cursor:pointer;transition:all .15s;margin-bottom:10px}
-.addr-card:hover{border-color:#bbb}
-.addr-card.sel{border-color:var(--orange);background:#fff9f6}
-.pay-opt{flex:1;border:2px solid var(--border);border-radius:var(--r-sm);padding:14px 8px;text-align:center;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px}
-.pay-opt.sel{border-color:var(--orange);background:#fff9f6}
+.addr-card{border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;cursor:pointer;transition:all .18s;margin-bottom:10px}
+.addr-card:hover{border-color:var(--border-strong)}
+.addr-card.sel{border-color:var(--orange);background:#fff9f6;box-shadow:0 2px 12px rgba(255,82,0,.1)}
+.pay-opt{flex:1;border:2px solid var(--border);border-radius:var(--r-sm);padding:14px 8px;text-align:center;cursor:pointer;transition:all .18s;display:flex;flex-direction:column;align-items:center;gap:4px}
+.pay-opt.sel{border-color:var(--orange);background:#fff9f6;box-shadow:0 2px 10px rgba(255,82,0,.1)}
 
 /* ── track dots ── */
 .track-step{display:flex;align-items:flex-start;gap:14px;position:relative}
@@ -498,21 +541,22 @@ a{text-decoration:none}
   display:flex;align-items:center;justify-content:center;gap:8px;
   width:100%;padding:15px;background:var(--orange);color:#fff;
   font-size:15px;font-weight:700;border-radius:var(--r);
-  transition:all .15s;cursor:pointer;border:none;font-family:var(--font);
+  transition:all .18s;cursor:pointer;border:none;font-family:var(--font);
+  letter-spacing:.01em;
 }
-.btn-primary:hover{background:var(--orange-d);transform:translateY(-1px);box-shadow:0 4px 16px rgba(255,82,0,.3)}
+.btn-primary:hover{background:var(--orange-d);transform:translateY(-1px);box-shadow:var(--shadow-orange)}
 .btn-primary:active{transform:none;box-shadow:none}
-.btn-primary:disabled{background:#d4d4d4;color:#aaa;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-primary:disabled{background:#dedad4;color:#aaa;cursor:not-allowed;transform:none;box-shadow:none}
 
 /* ── input ── */
-.inp{width:100%;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;color:var(--t1);background:#fff;transition:all .15s;font-family:var(--font)}
+.inp{width:100%;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;color:var(--t1);background:#fdfcfb;transition:all .18s;font-family:var(--font)}
 .inp::placeholder{color:var(--t3)}
-.inp:focus{border-color:var(--t1);box-shadow:0 0 0 3px rgba(0,0,0,.05)}
-.lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);margin-bottom:7px;display:block}
+.inp:focus{border-color:var(--t1);background:#fff;box-shadow:0 0 0 3px rgba(0,0,0,.04)}
+.lbl{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--t3);margin-bottom:7px;display:block}
 
 /* ── btn outline ── */
-.btn-out{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-weight:600;color:var(--t2);background:#fff;cursor:pointer;transition:all .15s;font-family:var(--font)}
-.btn-out:hover{border-color:var(--t1);color:var(--t1)}
+.btn-out{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border:1.5px solid var(--border);border-radius:var(--r-sm);font-size:13px;font-weight:600;color:var(--t2);background:#fff;cursor:pointer;transition:all .18s;font-family:var(--font)}
+.btn-out:hover{border-color:var(--border-strong);color:var(--t1)}
 
 /* ── modal qty control ── */
 .qty-ctrl{display:inline-flex;align-items:center;border:1.5px solid var(--border);border-radius:var(--r-pill);overflow:hidden}
@@ -601,6 +645,77 @@ a{text-decoration:none}
 .country-opt:hover{background:#f5f5f5}
 .country-search{width:100%;padding:10px 14px;border:none;border-bottom:1px solid var(--border);font-size:13px;font-family:var(--font);outline:none;color:var(--t1)}
 
+/* ── hero logo ── */
+.hero-logo-wrap{
+  display:flex;align-items:flex-end;gap:14px;margin-bottom:10px;
+  animation:heroTextIn .6s .12s both;
+}
+.hero-logo-img{
+  width:clamp(52px,13vw,72px);height:clamp(52px,13vw,72px);
+  border-radius:14px;object-fit:contain;background:rgba(255,255,255,.12);
+  border:1.5px solid rgba(255,255,255,.22);backdrop-filter:blur(8px);
+  flex-shrink:0;padding:4px;box-shadow:0 4px 18px rgba(0,0,0,.28);
+}
+.hero-logo-text{
+  display:flex;flex-direction:column;gap:3px;min-width:0;
+}
+.hero-logo-name{
+  font-family:var(--font-display);font-size:clamp(19px,5vw,30px);
+  font-weight:800;line-height:1.1;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.35);
+}
+.hero-logo-branch{
+  font-size:clamp(11px,2.5vw,13px);font-weight:600;color:rgba(255,255,255,.78);
+  letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.3);
+}
+
+/* ── restaurant info strip ── */
+.rest-info-strip{
+  background:var(--card);
+  border-bottom:1px solid var(--border);
+  padding:0;
+  overflow:hidden;
+}
+.rest-info-bar{
+  display:flex;align-items:center;gap:0;
+  padding:12px 16px;gap:16px;flex-wrap:wrap;
+}
+.rest-info-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12.5px;font-weight:500;color:var(--t2);
+  cursor:default;flex-shrink:0;
+}
+.rest-info-chip a{color:var(--orange);font-weight:600;text-decoration:none;}
+.rest-info-chip a:hover{text-decoration:underline}
+.rest-map-toggle{
+  margin-left:auto;
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:700;color:var(--orange);
+  background:var(--orange-l);border:1.5px solid rgba(255,82,0,.18);
+  border-radius:var(--r-pill);padding:5px 12px;cursor:pointer;
+  transition:all .18s;white-space:nowrap;flex-shrink:0;
+}
+.rest-map-toggle:hover{background:rgba(255,82,0,.14);border-color:rgba(255,82,0,.32)}
+.rest-map-panel{
+  overflow:hidden;
+  max-height:0;
+  transition:max-height .45s cubic-bezier(.4,0,.2,1), opacity .35s ease;
+  opacity:0;
+}
+.rest-map-panel.open{
+  max-height:260px;
+  opacity:1;
+}
+.rest-map-inner{
+  height:220px;
+  border-top:1px solid var(--border);
+  position:relative;
+}
+#rest-leaflet-map{width:100%;height:100%}
+@media(min-width:480px){
+  .rest-map-panel.open{ max-height:280px; }
+  .rest-map-inner{ height:240px; }
+}
+
 /* ── order history ── */
 .order-card{border:1.5px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:border-color .15s,background .15s}
 .order-card:hover{border-color:#bbb}
@@ -642,6 +757,364 @@ const ErrScreen = ({ msg }) => (
     </p>
   </div>
 );
+
+/* ── HeroSlideshow ────────────────────────────────────────────────────────── */
+const FALLBACK_IMAGES = [
+  "/image_1.jpg",
+  "/image_2.jpg",
+  "/image_3.jpg",
+  "/image_4.jpg",
+];
+
+function HeroSlideshow({ restaurant }) {
+  const rawSlides = [
+    restaurant?.image1_path,
+    restaurant?.image2_path,
+    restaurant?.image3_path,
+    restaurant?.image4_path,
+  ];
+  // Build slides: use restaurant image if present, else corresponding fallback
+  const slides = rawSlides.map((src, i) => src || FALLBACK_IMAGES[i]);
+  // If all three are identical (all null → all same fallback), deduplicate
+  const uniqueSlides = [...new Set(slides)];
+
+  const [current, setCurrent] = useState(0);
+  const [imgErrors, setImgErrors] = useState({});
+  const [logoErr, setLogoErr] = useState(false);
+  const timerRef = useRef(null);
+
+  const advance = useCallback(
+    (dir = 1) => {
+      setCurrent((c) => (c + dir + uniqueSlides.length) % uniqueSlides.length);
+    },
+    [uniqueSlides.length],
+  );
+
+  useEffect(() => {
+    if (uniqueSlides.length <= 1) return;
+    timerRef.current = setInterval(() => advance(1), 4800);
+    return () => clearInterval(timerRef.current);
+  }, [advance, uniqueSlides.length]);
+
+  const handleImgError = (idx) => {
+    setImgErrors((prev) => ({ ...prev, [idx]: true }));
+  };
+
+  return (
+    <div className="hero" style={{ height: "clamp(200px, 42vw, 300px)" }}>
+      {/* Slides */}
+      {uniqueSlides.map((src, idx) => (
+        <div
+          key={idx}
+          className={`hero-slide ${idx === current ? "hero-slide-active" : "hero-slide-inactive"}`}
+          style={{ zIndex: idx === current ? 2 : 1 }}
+        >
+          {!imgErrors[idx] ? (
+            <img
+              src={src}
+              alt={restaurant?.name || "Restaurant"}
+              onError={() => handleImgError(idx)}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center",
+                display: "block",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                background:
+                  "linear-gradient(135deg,#1a1714 0%,#2d2926 50%,#1a1714 100%)",
+              }}
+            />
+          )}
+        </div>
+      ))}
+
+      {/* Gradient overlay */}
+      <div className="hero-grad" style={{ zIndex: 3 }} />
+
+      {/* Open label */}
+      <div className="hero-open-label" style={{ zIndex: 5 }}>
+        Now open
+      </div>
+
+      {/* Content */}
+      <div className="hero-content" style={{ zIndex: 5 }}>
+        {/* Logo + name row */}
+        <div className="hero-logo-wrap">
+          {restaurant?.logo_path && !logoErr ? (
+            <img
+              src={restaurant.logo_path}
+              alt={restaurant?.name}
+              className="hero-logo-img"
+              onError={() => setLogoErr(true)}
+            />
+          ) : null}
+          <div className="hero-logo-text">
+            <span className="hero-logo-name">{restaurant?.name}</span>
+            {restaurant?.branch_name && (
+              <span className="hero-logo-branch">{restaurant.branch_name}</span>
+            )}
+          </div>
+        </div>
+        <div className="hero-meta">
+          {restaurant?.working_hours && (
+            <span className="hero-meta-chip">
+              {Ic.clock} {restaurant.working_hours}
+            </span>
+          )}
+          {restaurant?.min_order && (
+            <span className="hero-meta-chip">
+              🔥 Min. {fmt(restaurant.min_order)}
+            </span>
+          )}
+          <span className="hero-meta-chip">{Ic.truck} ~25 min</span>
+        </div>
+      </div>
+
+      {/* Slide dots (only if more than one slide) */}
+      {uniqueSlides.length > 1 && (
+        <div className="hero-dots" style={{ zIndex: 5 }}>
+          {uniqueSlides.map((_, idx) => (
+            <button
+              key={idx}
+              className={`hero-dot${idx === current ? " on" : ""}`}
+              onClick={() => {
+                clearInterval(timerRef.current);
+                setCurrent(idx);
+                timerRef.current = setInterval(() => advance(1), 4800);
+              }}
+              aria-label={`Slide ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── RestaurantInfoStrip ──────────────────────────────────────────────────── */
+function RestaurantInfoStrip({ restaurant }) {
+  const [mapOpen, setMapOpen] = useState(false);
+  const mapRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const markerRef = useRef(null);
+
+  const lat = Number(restaurant?.latitude);
+  const lng = Number(restaurant?.longitude);
+  const hasLocation = lat && lng && !isNaN(lat) && !isNaN(lng);
+
+  // Init / destroy Leaflet map when panel opens/closes
+  useEffect(() => {
+    if (!mapOpen || !hasLocation) return;
+
+    // Small delay so the CSS transition has started and the container has height
+    const timer = setTimeout(() => {
+      if (!mapRef.current) return;
+      if (leafletMapRef.current) return; // already init
+
+      loadLeaflet(() => {
+        const L = window.L;
+        if (!L || !mapRef.current) return;
+
+        const map = L.map(mapRef.current, {
+          zoomControl: true,
+          scrollWheelZoom: false,
+          dragging: true,
+          tap: true,
+        }).setView([lat, lng], 15);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OSM contributors",
+          maxZoom: 19,
+        }).addTo(map);
+
+        // Animated pulsing marker
+        const pulseIcon = L.divIcon({
+          html: `<div style="
+            position:relative;width:32px;height:32px;
+            display:flex;align-items:center;justify-content:center;
+          ">
+            <div style="
+              position:absolute;width:32px;height:32px;border-radius:50%;
+              background:rgba(255,82,0,.25);
+              animation:mapPulse 1.8s ease-out infinite;
+            "></div>
+            <div style="
+              width:16px;height:16px;border-radius:50%;
+              background:var(--orange,#ff5200);
+              border:2.5px solid #fff;
+              box-shadow:0 2px 8px rgba(255,82,0,.5);
+              position:relative;z-index:1;
+            "></div>
+          </div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          className: "",
+        });
+
+        const marker = L.marker([lat, lng], { icon: pulseIcon }).addTo(map);
+        const popupText = [
+          `<strong>${restaurant?.name || ""}${restaurant?.branch_name ? " · " + restaurant.branch_name : ""}</strong>`,
+          restaurant?.address || "",
+        ]
+          .filter(Boolean)
+          .join("<br/>");
+        if (popupText) marker.bindPopup(popupText).openPopup();
+
+        leafletMapRef.current = map;
+        markerRef.current = marker;
+      });
+    }, 80);
+
+    return () => {
+      clearTimeout(timer);
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove();
+        leafletMapRef.current = null;
+        markerRef.current = null;
+      }
+    };
+  }, [mapOpen]); // eslint-disable-line
+
+  const hasInfo = restaurant?.address || restaurant?.ph_no;
+  if (!hasInfo && !hasLocation) return null;
+
+  return (
+    <>
+      {/* Inject pulse animation keyframe once */}
+      <style>{`
+        @keyframes mapPulse {
+          0% { transform: scale(1); opacity: .7; }
+          70% { transform: scale(2.4); opacity: 0; }
+          100% { transform: scale(1); opacity: 0; }
+        }
+      `}</style>
+
+      <div className="rest-info-strip">
+        {/* Info bar */}
+        <div className="rest-info-bar">
+          {/* Address */}
+          {restaurant?.address && (
+            <span className="rest-info-chip">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                style={{ color: "var(--orange)", flexShrink: 0 }}
+              >
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+              </svg>
+              {restaurant.address}
+            </span>
+          )}
+
+          {/* Phone */}
+          {restaurant?.ph_no && (
+            <span className="rest-info-chip">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ color: "var(--orange)", flexShrink: 0 }}
+              >
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.18 6.18l1.08-.93a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+              <a href={`tel:${restaurant.ph_no}`}>{restaurant.ph_no}</a>
+            </span>
+          )}
+
+          {/* Map toggle — only if we have coordinates */}
+          {hasLocation && (
+            <button
+              className="rest-map-toggle"
+              onClick={() => setMapOpen((o) => !o)}
+              aria-expanded={mapOpen}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                {mapOpen ? (
+                  <>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </>
+                ) : (
+                  <>
+                    <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6" />
+                  </>
+                )}
+              </svg>
+              {mapOpen ? "Close map" : "View map"}
+            </button>
+          )}
+        </div>
+
+        {/* Animated map panel */}
+        {hasLocation && (
+          <div className={`rest-map-panel${mapOpen ? " open" : ""}`}>
+            <div className="rest-map-inner">
+              <div ref={mapRef} id="rest-leaflet-map" />
+              {/* "Get directions" overlay link */}
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  position: "absolute",
+                  bottom: 10,
+                  right: 10,
+                  zIndex: 1000,
+                  background: "#fff",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--r-pill)",
+                  padding: "5px 12px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--orange)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  boxShadow: "0 2px 8px rgba(0,0,0,.12)",
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                </svg>
+                Get directions ↗
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 /* ── Load Leaflet from CDN (once) ─────────────────────────────────────────── */
 let leafletLoaded = false;
@@ -1538,7 +2011,11 @@ function CartSheet({
   customer,
   restId,
 }) {
-  const { subT, delivery, total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
+  const { subT, delivery, total, discountAmt } = calcTotals(
+    cart,
+    addonCart,
+    appliedDiscount,
+  );
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
     cart.reduce((s, c) => s + c.qty, 0) +
@@ -1551,14 +2028,24 @@ function CartSheet({
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
 
   const applyCode = async () => {
     const code = codeInput.trim().toUpperCase();
-    if (!code) { setCodeErr("Please enter a discount code."); return; }
-    if (!customer) { setCodeErr("You must be logged in to apply a discount."); return; }
-    setCodeLoading(true); setCodeErr(""); setCodeOk(false);
+    if (!code) {
+      setCodeErr("Please enter a discount code.");
+      return;
+    }
+    if (!customer) {
+      setCodeErr("You must be logged in to apply a discount.");
+      return;
+    }
+    setCodeLoading(true);
+    setCodeErr("");
+    setCodeOk(false);
     try {
       const today = new Date().toISOString().slice(0, 10);
       const { data, error } = await supabase
@@ -1569,14 +2056,34 @@ function CartSheet({
         .eq("is_active", true)
         .maybeSingle();
       if (error) throw error;
-      if (!data) { setCodeErr("Invalid or inactive discount code."); onApplyDiscount(null); return; }
-      if (data.avail_from && data.avail_from > today) { setCodeErr(`This code is not valid until ${data.avail_from}.`); onApplyDiscount(null); return; }
-      if (data.expiry_date && data.expiry_date < today) { setCodeErr("This discount code has expired."); onApplyDiscount(null); return; }
+      if (!data) {
+        setCodeErr("Invalid or inactive discount code.");
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.avail_from && data.avail_from > today) {
+        setCodeErr(`This code is not valid until ${data.avail_from}.`);
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.expiry_date && data.expiry_date < today) {
+        setCodeErr("This discount code has expired.");
+        onApplyDiscount(null);
+        return;
+      }
       if (data.min_order && subT < Number(data.min_order)) {
-        setCodeErr(`Minimum order of KD ${Number(data.min_order).toFixed(3)} required for this code.`); onApplyDiscount(null); return;
+        setCodeErr(
+          `Minimum order of KD ${Number(data.min_order).toFixed(3)} required for this code.`,
+        );
+        onApplyDiscount(null);
+        return;
       }
       if (data.max_order && subT > Number(data.max_order)) {
-        setCodeErr(`This code only applies to orders up to KD ${Number(data.max_order).toFixed(3)}.`); onApplyDiscount(null); return;
+        setCodeErr(
+          `This code only applies to orders up to KD ${Number(data.max_order).toFixed(3)}.`,
+        );
+        onApplyDiscount(null);
+        return;
       }
       // Check per-customer usage
       const { count } = await supabase
@@ -1585,18 +2092,26 @@ function CartSheet({
         .eq("discount_id", data.id)
         .eq("cust_id", customer.id);
       if (count >= data.max_uses_per_customer) {
-        setCodeErr(`You have already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`);
-        onApplyDiscount(null); return;
+        setCodeErr(
+          `You have already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`,
+        );
+        onApplyDiscount(null);
+        return;
       }
       onApplyDiscount(data);
       setCodeOk(true);
     } catch (e) {
       setCodeErr("Failed to validate code. Please try again.");
-    } finally { setCodeLoading(false); }
+    } finally {
+      setCodeLoading(false);
+    }
   };
 
   const removeCode = () => {
-    setCodeInput(""); setCodeOk(false); setCodeErr(""); onApplyDiscount(null);
+    setCodeInput("");
+    setCodeOk(false);
+    setCodeErr("");
+    onApplyDiscount(null);
   };
 
   return (
@@ -1616,35 +2131,85 @@ function CartSheet({
         {totalItems === 0 ? (
           <div style={{ padding: "48px 20px", textAlign: "center" }}>
             <div style={{ fontSize: 56, marginBottom: 12 }}>🛒</div>
-            <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Your cart is empty</p>
-            <p style={{ color: "var(--t2)", fontSize: 14 }}>Add items from the menu to get started</p>
+            <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>
+              Your cart is empty
+            </p>
+            <p style={{ color: "var(--t2)", fontSize: 14 }}>
+              Add items from the menu to get started
+            </p>
           </div>
         ) : (
           <div style={{ padding: "0 20px 24px" }}>
             {/* ── Menu items ── */}
             {cart.length > 0 && (
               <div style={{ marginBottom: 4 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".06em", padding: "10px 0 6px" }}>
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--t3)",
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    padding: "10px 0 6px",
+                  }}
+                >
                   Menu items
                 </p>
                 {cart.map((c, i) => {
-                  const varLines = Object.values(c.variantMeta || {}).flatMap((m) => m.optionNames).filter(Boolean);
+                  const varLines = Object.values(c.variantMeta || {})
+                    .flatMap((m) => m.optionNames)
+                    .filter(Boolean);
                   return (
                     <div key={i} className="cart-row">
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{c.item.name}</p>
+                        <p
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 14,
+                            marginBottom: 2,
+                          }}
+                        >
+                          {c.item.name}
+                        </p>
                         {varLines.length > 0 && (
                           <p className="cart-detail">
-                            {varLines.map((v, vi) => <span key={vi} style={{ display: "inline-block", marginRight: 6 }}>· {v}</span>)}
+                            {varLines.map((v, vi) => (
+                              <span
+                                key={vi}
+                                style={{
+                                  display: "inline-block",
+                                  marginRight: 6,
+                                }}
+                              >
+                                · {v}
+                              </span>
+                            ))}
                           </p>
                         )}
-                        {c.note && <p className="cart-note" style={{ marginTop: 3 }}>📝 {c.note}</p>}
-                        <p style={{ fontSize: 13, color: "var(--t2)", fontWeight: 700, marginTop: 3 }}>{fmt(c.unitPrice)}</p>
+                        {c.note && (
+                          <p className="cart-note" style={{ marginTop: 3 }}>
+                            📝 {c.note}
+                          </p>
+                        )}
+                        <p
+                          style={{
+                            fontSize: 13,
+                            color: "var(--t2)",
+                            fontWeight: 700,
+                            marginTop: 3,
+                          }}
+                        >
+                          {fmt(c.unitPrice)}
+                        </p>
                       </div>
                       <div className="qty-ctrl" style={{ flexShrink: 0 }}>
-                        <button onClick={() => onUpdateQty(i, c.qty - 1)}>{c.qty === 1 ? Ic.trash : Ic.minus}</button>
+                        <button onClick={() => onUpdateQty(i, c.qty - 1)}>
+                          {c.qty === 1 ? Ic.trash : Ic.minus}
+                        </button>
                         <span>{c.qty}</span>
-                        <button onClick={() => onUpdateQty(i, c.qty + 1)}>{Ic.plus}</button>
+                        <button onClick={() => onUpdateQty(i, c.qty + 1)}>
+                          {Ic.plus}
+                        </button>
                       </div>
                     </div>
                   );
@@ -1655,19 +2220,48 @@ function CartSheet({
             {/* ── Add-on cart rows ── */}
             {addonCart.length > 0 && (
               <div style={{ marginBottom: 4 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".06em", padding: "10px 0 6px" }}>
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--t3)",
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    padding: "10px 0 6px",
+                  }}
+                >
                   Add-ons
                 </p>
                 {addonCart.map((a, i) => (
                   <div key={i} className="cart-row">
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{a.addon.name}</p>
-                      <p style={{ fontSize: 13, color: "var(--t2)", fontWeight: 700 }}>{fmt(a.addon.price)}</p>
+                      <p
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 14,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {a.addon.name}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "var(--t2)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {fmt(a.addon.price)}
+                      </p>
                     </div>
                     <div className="qty-ctrl" style={{ flexShrink: 0 }}>
-                      <button onClick={() => onUpdateAddonQty(a.addon.id, -1)}>{a.qty === 1 ? Ic.trash : Ic.minus}</button>
+                      <button onClick={() => onUpdateAddonQty(a.addon.id, -1)}>
+                        {a.qty === 1 ? Ic.trash : Ic.minus}
+                      </button>
                       <span>{a.qty}</span>
-                      <button onClick={() => onUpdateAddonQty(a.addon.id, 1)}>{Ic.plus}</button>
+                      <button onClick={() => onUpdateAddonQty(a.addon.id, 1)}>
+                        {Ic.plus}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1676,52 +2270,145 @@ function CartSheet({
 
             {/* ── Order note ── */}
             <div style={{ margin: "16px 0" }}>
-              <label className="lbl">Order note <span style={{ textTransform: "none", fontWeight: 400, color: "var(--t3)" }}>(optional · applies to whole order)</span></label>
+              <label className="lbl">
+                Order note{" "}
+                <span
+                  style={{
+                    textTransform: "none",
+                    fontWeight: 400,
+                    color: "var(--t3)",
+                  }}
+                >
+                  (optional · applies to whole order)
+                </span>
+              </label>
               <textarea
-                className="inp" rows={2}
+                className="inp"
+                rows={2}
                 placeholder="e.g. ring the bell, leave at door, no plastic bags…"
                 style={{ resize: "none", fontSize: 13.5 }}
-                value={note} onChange={(e) => onNoteChange(e.target.value)} maxLength={300}
+                value={note}
+                onChange={(e) => onNoteChange(e.target.value)}
+                maxLength={300}
               />
             </div>
 
             {/* ── Discount code input ── */}
             <div style={{ marginBottom: 14 }}>
-              <label className="lbl">Discount code <span style={{ textTransform: "none", fontWeight: 400, color: "var(--t3)" }}>(optional)</span></label>
+              <label className="lbl">
+                Discount code{" "}
+                <span
+                  style={{
+                    textTransform: "none",
+                    fontWeight: 400,
+                    color: "var(--t3)",
+                  }}
+                >
+                  (optional)
+                </span>
+              </label>
               {codeOk && appliedDiscount ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: "var(--r-sm)", padding: "10px 14px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    borderRadius: "var(--r-sm)",
+                    padding: "10px 14px",
+                  }}
+                >
                   <span style={{ fontSize: 18 }}>🎉</span>
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontWeight: 800, color: "#15803d", fontSize: 13, margin: 0 }}>{appliedDiscount.code}</p>
-                    <p style={{ color: "#166534", fontSize: 12, margin: "2px 0 0" }}>
-                      {appliedDiscount.type === "percentage" ? `${appliedDiscount.value}% off` : `KD ${Number(appliedDiscount.value).toFixed(3)} off`} applied!
+                    <p
+                      style={{
+                        fontWeight: 800,
+                        color: "#15803d",
+                        fontSize: 13,
+                        margin: 0,
+                      }}
+                    >
+                      {appliedDiscount.code}
+                    </p>
+                    <p
+                      style={{
+                        color: "#166534",
+                        fontSize: 12,
+                        margin: "2px 0 0",
+                      }}
+                    >
+                      {appliedDiscount.type === "percentage"
+                        ? `${appliedDiscount.value}% off`
+                        : `KD ${Number(appliedDiscount.value).toFixed(3)} off`}{" "}
+                      applied!
                     </p>
                   </div>
-                  <button onClick={removeCode} style={{ background: "none", border: "none", cursor: "pointer", color: "#15803d", fontSize: 18, lineHeight: 1 }}>✕</button>
+                  <button
+                    onClick={removeCode}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#15803d",
+                      fontSize: 18,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
-                    className="inp" style={{ flex: 1, textTransform: "uppercase", fontWeight: 700, letterSpacing: ".04em" }}
+                    className="inp"
+                    style={{
+                      flex: 1,
+                      textTransform: "uppercase",
+                      fontWeight: 700,
+                      letterSpacing: ".04em",
+                    }}
                     placeholder="Enter code…"
                     value={codeInput}
-                    onChange={e => { setCodeInput(e.target.value.toUpperCase()); setCodeErr(""); }}
-                    onKeyDown={e => e.key === "Enter" && applyCode()}
+                    onChange={(e) => {
+                      setCodeInput(e.target.value.toUpperCase());
+                      setCodeErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && applyCode()}
                   />
                   <button
                     className="btn-out"
-                    onClick={applyCode} disabled={codeLoading}
+                    onClick={applyCode}
+                    disabled={codeLoading}
                     style={{ flexShrink: 0, whiteSpace: "nowrap" }}
                   >
                     {codeLoading ? "…" : "Apply"}
                   </button>
                 </div>
               )}
-              {codeErr && <p style={{ color: "var(--red)", fontSize: 12, marginTop: 6, fontWeight: 500 }}>⚠️ {codeErr}</p>}
+              {codeErr && (
+                <p
+                  style={{
+                    color: "var(--red)",
+                    fontSize: 12,
+                    marginTop: 6,
+                    fontWeight: 500,
+                  }}
+                >
+                  ⚠️ {codeErr}
+                </p>
+              )}
             </div>
 
             {/* ── Bill summary ── */}
-            <div style={{ background: "#fafafa", borderRadius: var_r, padding: "14px 16px", marginBottom: 14 }}>
+            <div
+              style={{
+                background: "#fafafa",
+                borderRadius: var_r,
+                padding: "14px 16px",
+                marginBottom: 14,
+              }}
+            >
               <div className="sum-row">
                 <span>Subtotal</span>
                 <span>{fmt(subT)}</span>
@@ -1731,12 +2418,21 @@ function CartSheet({
                 <span>{fmt(delivery)}</span>
               </div>
               {discountAmt > 0 && (
-                <div className="sum-row" style={{ color: "#15803d", fontWeight: 700 }}>
+                <div
+                  className="sum-row"
+                  style={{ color: "#15803d", fontWeight: 700 }}
+                >
                   <span>🏷 Discount ({appliedDiscount?.code})</span>
                   <span>−{fmt(discountAmt)}</span>
                 </div>
               )}
-              <div style={{ borderTop: "1px solid var(--border)", marginTop: 10, paddingTop: 10 }}>
+              <div
+                style={{
+                  borderTop: "1px solid var(--border)",
+                  marginTop: 10,
+                  paddingTop: 10,
+                }}
+              >
                 <div className="sum-row total">
                   <span>Total</span>
                   <span>{fmt(total)}</span>
@@ -1745,12 +2441,28 @@ function CartSheet({
             </div>
 
             {restaurant?.min_order && subT < restaurant.min_order && (
-              <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: var_r_sm, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#e65100", fontWeight: 500 }}>
-                ⚠️ Min. order {fmt(restaurant.min_order)} · add {fmt(restaurant.min_order - subT)} more
+              <div
+                style={{
+                  background: "#fff8e1",
+                  border: "1px solid #ffe082",
+                  borderRadius: var_r_sm,
+                  padding: "10px 14px",
+                  marginBottom: 14,
+                  fontSize: 13,
+                  color: "#e65100",
+                  fontWeight: 500,
+                }}
+              >
+                ⚠️ Min. order {fmt(restaurant.min_order)} · add{" "}
+                {fmt(restaurant.min_order - subT)} more
               </div>
             )}
 
-            <button className="btn-primary" disabled={!minOk} onClick={() => onCheckout(total, note)}>
+            <button
+              className="btn-primary"
+              disabled={!minOk}
+              onClick={() => onCheckout(total, note)}
+            >
               Proceed to checkout · {fmt(total)}
             </button>
           </div>
@@ -1777,17 +2489,35 @@ function CheckoutSheet({
   appliedDiscount,
   discountAmt,
   subTotal,
+  acceptDelivery,
+  acceptPickup,
+  orderType,
+  onOrderTypeChange,
 }) {
   const [selAddr, setSelAddr] = useState(defaultAddr?.id || null);
   const [pay, setPay] = useState("Cash");
   const [placing, setPlacing] = useState(false);
+  const [typeErr, setTypeErr] = useState("");
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
 
+  // If the current type becomes unavailable (restaurant toggled it off while sheet is open), auto-switch
+  useEffect(() => {
+    if (orderType === "delivery" && !acceptDelivery && acceptPickup) {
+      onOrderTypeChange("pickup");
+    } else if (orderType === "pickup" && !acceptPickup && acceptDelivery) {
+      onOrderTypeChange("delivery");
+    }
+  }, [acceptDelivery, acceptPickup, orderType, onOrderTypeChange]);
+
   const addr = addresses.find((a) => a.id === selAddr);
+  const isPickup = orderType === "pickup";
+  const bothOff = !acceptDelivery && !acceptPickup;
 
   return (
     <>
@@ -1796,69 +2526,249 @@ function CheckoutSheet({
         <div className="drag-pill" />
         <div className="sheet-hd">
           <span className="sheet-title">Checkout</span>
-          <button className="close-btn" onClick={onClose}>{Ic.close}</button>
+          <button className="close-btn" onClick={onClose}>
+            {Ic.close}
+          </button>
         </div>
         <div style={{ padding: "0 20px 20px" }}>
-          {/* Address */}
-          <div style={{ marginBottom: 22 }}>
-            <label className="lbl">Delivery address</label>
-            {addresses.length === 0 ? (
-              <button className="btn-out" style={{ width: "100%", justifyContent: "center" }} onClick={onAddAddress}>
-                {Ic.plus} Add address
-              </button>
-            ) : (
-              <>
-                {addresses.map((a) => (
-                  <div key={a.id} className={`addr-card${selAddr === a.id ? " sel" : ""}`} onClick={() => setSelAddr(a.id)}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ color: "var(--t2)" }}>{a.label === "Work" ? Ic.work : Ic.homeaddr}</span>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
-                      {selAddr === a.id && <span style={{ marginLeft: "auto", color: "var(--orange)" }}>{Ic.check}</span>}
-                    </div>
-                    <p style={{ fontSize: 13, color: "var(--t2)", paddingLeft: 22 }}>
-                      {[a.apartment_no && `Apt ${a.apartment_no}`, a.floor && `Floor ${a.floor}`, a.bldg_name, a.street, a.block].filter(Boolean).join(", ")}
-                    </p>
+          {/* Both off — hard block */}
+          {bothOff && (
+            <div
+              style={{
+                background: "#fff8f0",
+                border: "1.5px solid #fed7aa",
+                borderRadius: var_r_sm,
+                padding: "18px 16px",
+                marginBottom: 20,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 36, marginBottom: 8 }}>🔕</div>
+              <p
+                style={{
+                  fontWeight: 800,
+                  fontSize: 15,
+                  color: "#92400e",
+                  marginBottom: 4,
+                }}
+              >
+                Not accepting orders right now
+              </p>
+              <p style={{ fontSize: 13, color: "#b45309" }}>
+                The restaurant has temporarily paused all orders. Please check
+                back soon!
+              </p>
+            </div>
+          )}
+
+          {/* Order type selector — only when both are available or when one is on */}
+          {!bothOff && (acceptDelivery || acceptPickup) && (
+            <div style={{ marginBottom: 22 }}>
+              <label className="lbl">Order type</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                {acceptDelivery && (
+                  <div
+                    className={`pay-opt${!isPickup ? " sel" : ""}`}
+                    onClick={() => {
+                      onOrderTypeChange("delivery");
+                      setTypeErr("");
+                    }}
+                    style={{ flex: 1 }}
+                  >
+                    <span style={{ fontSize: 24 }}>🛵</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                      Delivery
+                    </span>
                   </div>
-                ))}
-                <button className="btn-out" style={{ justifyContent: "center", width: "100%", marginTop: 4 }} onClick={onAddAddress}>
-                  {Ic.plus} Add new address
+                )}
+                {acceptPickup && (
+                  <div
+                    className={`pay-opt${isPickup ? " sel" : ""}`}
+                    onClick={() => {
+                      onOrderTypeChange("pickup");
+                      setTypeErr("");
+                    }}
+                    style={{ flex: 1 }}
+                  >
+                    <span style={{ fontSize: 24 }}>🏃</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                      Pickup
+                    </span>
+                  </div>
+                )}
+              </div>
+              {/* Pickup info notice */}
+              {isPickup && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: "#f0fdfa",
+                    border: "1px solid #99f6e4",
+                    borderRadius: var_r_sm,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    color: "#0f766e",
+                    fontWeight: 500,
+                  }}
+                >
+                  🏃 You'll collect this order in person from the restaurant.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Address — delivery only */}
+          {!bothOff && !isPickup && (
+            <div style={{ marginBottom: 22 }}>
+              <label className="lbl">Delivery address</label>
+              {addresses.length === 0 ? (
+                <button
+                  className="btn-out"
+                  style={{ width: "100%", justifyContent: "center" }}
+                  onClick={onAddAddress}
+                >
+                  {Ic.plus} Add address
                 </button>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  {addresses.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`addr-card${selAddr === a.id ? " sel" : ""}`}
+                      onClick={() => setSelAddr(a.id)}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span style={{ color: "var(--t2)" }}>
+                          {a.label === "Work" ? Ic.work : Ic.homeaddr}
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>
+                          {a.label}
+                        </span>
+                        {selAddr === a.id && (
+                          <span
+                            style={{
+                              marginLeft: "auto",
+                              color: "var(--orange)",
+                            }}
+                          >
+                            {Ic.check}
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "var(--t2)",
+                          paddingLeft: 22,
+                        }}
+                      >
+                        {[
+                          a.apartment_no && `Apt ${a.apartment_no}`,
+                          a.floor && `Floor ${a.floor}`,
+                          a.bldg_name,
+                          a.street,
+                          a.block,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                    </div>
+                  ))}
+                  <button
+                    className="btn-out"
+                    style={{
+                      justifyContent: "center",
+                      width: "100%",
+                      marginTop: 4,
+                    }}
+                    onClick={onAddAddress}
+                  >
+                    {Ic.plus} Add new address
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Payment */}
-          <div style={{ marginBottom: 22 }}>
-            <label className="lbl">Payment method</label>
-            <div style={{ display: "flex", gap: 10 }}>
-              {[["Cash", "💵"], ["Card", "💳"], ["Online", "📱"]].map(([m, em]) => (
-                <div key={m} className={`pay-opt${pay === m ? " sel" : ""}`} onClick={() => setPay(m)}>
-                  <span style={{ fontSize: 24 }}>{em}</span>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{m}</span>
-                </div>
-              ))}
+          {!bothOff && (
+            <div style={{ marginBottom: 22 }}>
+              <label className="lbl">Payment method</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                {[
+                  ["Cash", "💵"],
+                  ["Card", "💳"],
+                  ["Online", "📱"],
+                ].map(([m, em]) => (
+                  <div
+                    key={m}
+                    className={`pay-opt${pay === m ? " sel" : ""}`}
+                    onClick={() => setPay(m)}
+                  >
+                    <span style={{ fontSize: 24 }}>{em}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{m}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Notes */}
-          {cartNote ? (
+          {!bothOff && cartNote ? (
             <div style={{ marginBottom: 22 }}>
               <label className="lbl">Special instructions</label>
-              <div style={{ background: "#fafafa", border: "1px solid var(--border)", borderRadius: var_r_sm, padding: "10px 14px", fontSize: 13.5, color: "var(--t2)", lineHeight: 1.5 }}>
+              <div
+                style={{
+                  background: "#fafafa",
+                  border: "1px solid var(--border)",
+                  borderRadius: var_r_sm,
+                  padding: "10px 14px",
+                  fontSize: 13.5,
+                  color: "var(--t2)",
+                  lineHeight: 1.5,
+                }}
+              >
                 {cartNote}
               </div>
             </div>
           ) : null}
 
           {/* Applied discount badge */}
-          {appliedDiscount && discountAmt > 0 && (
-            <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: var_r_sm, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+          {!bothOff && appliedDiscount && discountAmt > 0 && (
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1px solid #86efac",
+                borderRadius: var_r_sm,
+                padding: "10px 14px",
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
               <span style={{ fontSize: 18 }}>🏷️</span>
               <div style={{ flex: 1 }}>
-                <p style={{ fontWeight: 800, color: "#15803d", fontSize: 13, margin: 0 }}>
+                <p
+                  style={{
+                    fontWeight: 800,
+                    color: "#15803d",
+                    fontSize: 13,
+                    margin: 0,
+                  }}
+                >
                   Code "{appliedDiscount.code}" applied
                 </p>
-                <p style={{ color: "#166534", fontSize: 12, margin: "2px 0 0" }}>
+                <p
+                  style={{ color: "#166534", fontSize: 12, margin: "2px 0 0" }}
+                >
                   You save {fmt(discountAmt)} on this order
                 </p>
               </div>
@@ -1866,35 +2776,116 @@ function CheckoutSheet({
           )}
 
           {/* Total summary */}
-          <div style={{ background: "#fafafa", borderRadius: var_r_sm, padding: "13px 16px", marginBottom: 16 }}>
-            {subTotal != null && (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t2)", marginBottom: 6 }}>
-                <span>Subtotal</span><span>{fmt(subTotal)}</span>
+          {!bothOff && (
+            <div
+              style={{
+                background: "#fafafa",
+                borderRadius: var_r_sm,
+                padding: "13px 16px",
+                marginBottom: 16,
+              }}
+            >
+              {subTotal != null && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    color: "var(--t2)",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>Subtotal</span>
+                  <span>{fmt(subTotal)}</span>
+                </div>
+              )}
+              {/* Delivery fee row — delivery only */}
+              {!isPickup && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    color: "var(--t2)",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>Delivery fee</span>
+                  <span>{fmt(0.5)}</span>
+                </div>
+              )}
+              {appliedDiscount && discountAmt > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    color: "#15803d",
+                    fontWeight: 700,
+                    marginBottom: 6,
+                  }}
+                >
+                  <span>🏷 Discount</span>
+                  <span>−{fmt(discountAmt)}</span>
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderTop:
+                    subTotal != null ? "1px solid var(--border)" : "none",
+                  paddingTop: subTotal != null ? 10 : 0,
+                  marginTop: subTotal != null ? 6 : 0,
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>Total to pay</span>
+                <span style={{ fontSize: 18, fontWeight: 800 }}>
+                  {fmt(total)}
+                </span>
               </div>
-            )}
-            {appliedDiscount && discountAmt > 0 && (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#15803d", fontWeight: 700, marginBottom: 6 }}>
-                <span>🏷 Discount</span><span>−{fmt(discountAmt)}</span>
-              </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: subTotal != null ? "1px solid var(--border)" : "none", paddingTop: subTotal != null ? 10 : 0, marginTop: subTotal != null ? 6 : 0 }}>
-              <span style={{ fontWeight: 600 }}>Total to pay</span>
-              <span style={{ fontSize: 18, fontWeight: 800 }}>{fmt(total)}</span>
             </div>
-          </div>
+          )}
 
-          <button
-            className="btn-primary"
-            disabled={placing || !selAddr}
-            onClick={async () => {
-              if (!addr) { alert("Please select a delivery address."); return; }
-              setPlacing(true);
-              await onPlaceOrder({ address: addr, payMethod: pay, notes: cartNote || "" });
-              setPlacing(false);
-            }}
-          >
-            {placing ? <Spinner size={20} /> : `Place order · ${fmt(total)}`}
-          </button>
+          {/* Error */}
+          {typeErr && (
+            <p
+              style={{
+                color: "var(--red)",
+                fontSize: 13,
+                marginBottom: 10,
+                fontWeight: 600,
+              }}
+            >
+              ⚠️ {typeErr}
+            </p>
+          )}
+
+          {/* Place order button */}
+          {!bothOff && (
+            <button
+              className="btn-primary"
+              disabled={placing || (!isPickup && !selAddr)}
+              onClick={async () => {
+                if (!isPickup && !addr) {
+                  setTypeErr("Please select a delivery address.");
+                  return;
+                }
+                setTypeErr("");
+                setPlacing(true);
+                await onPlaceOrder({
+                  address: isPickup ? null : addr,
+                  payMethod: pay,
+                  notes: cartNote || "",
+                  orderType,
+                });
+                setPlacing(false);
+              }}
+            >
+              {placing ? <Spinner size={20} /> : `Place order · ${fmt(total)}`}
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -1902,11 +2893,71 @@ function CheckoutSheet({
 }
 
 /* ── TrackSheet ───────────────────────────────────────────────────────────── */
-function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
+function TrackSheet({
+  order,
+  restaurant,
+  address,
+  onClose,
+  onStatusUpdate,
+  onCancelOrder,
+}) {
   const [liveStatus, setLiveStatus] = useState(order?.status || "pending");
   const [riderName, setRiderName] = useState(
     order?.delivery_rider_name || null,
   );
+
+  // Cancel state
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState("");
+
+  const canCancel = liveStatus === "pending";
+  const isAlreadyAccepted =
+    liveStatus === "accepted" ||
+    liveStatus === "preparing" ||
+    liveStatus === "on_the_way" ||
+    liveStatus === "delivered" ||
+    liveStatus === "rejected";
+
+  const handleCancel = async () => {
+    if (!order?.id) return;
+    setCancelling(true);
+    setCancelErr("");
+    try {
+      const { error: updateErr } = await supabase
+        .from("Orders")
+        .update({ status: "cancelled" })
+        .eq("id", order.id)
+        .eq("status", "pending"); // safety guard: only cancel if still pending
+      if (updateErr) throw updateErr;
+
+      // Re-fetch to check for a race (restaurant accepted at the same moment)
+      const { data: fresh, error: fetchErr } = await supabase
+        .from("Orders")
+        .select("status")
+        .eq("id", order.id)
+        .single();
+      if (fetchErr) throw fetchErr;
+
+      if (fresh?.status !== "cancelled") {
+        setCancelErr(
+          "Your order was already accepted by the restaurant and can no longer be cancelled.",
+        );
+        setLiveStatus(fresh.status);
+        if (onStatusUpdate) onStatusUpdate(fresh.status);
+      } else {
+        setLiveStatus("cancelled");
+        setShowCancelConfirm(false);
+        if (onStatusUpdate) onStatusUpdate("cancelled");
+        if (onCancelOrder) onCancelOrder(order.id);
+      }
+    } catch (e) {
+      console.error("[TrackSheet] cancel error:", e);
+      setCancelErr("Failed to cancel order. Please try again.");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const steps = [
     { l: "Order placed!", e: "✅" },
@@ -1988,13 +3039,13 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
                 background:
                   liveStatus === "delivered"
                     ? "var(--green-l)"
-                    : liveStatus === "rejected"
+                    : liveStatus === "rejected" || liveStatus === "cancelled"
                       ? "var(--red-l)"
                       : "#fff0e8",
                 color:
                   liveStatus === "delivered"
                     ? "var(--green)"
-                    : liveStatus === "rejected"
+                    : liveStatus === "rejected" || liveStatus === "cancelled"
                       ? "var(--red)"
                       : "var(--orange)",
               }}
@@ -2003,13 +3054,15 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
                 ? "Delivered ✅"
                 : liveStatus === "rejected"
                   ? "Rejected"
-                  : liveStatus === "on_the_way"
-                    ? "On the way 🛵"
-                    : liveStatus === "preparing"
-                      ? "Preparing 👨‍🍳"
-                      : liveStatus === "accepted"
-                        ? "Accepted"
-                        : "Pending"}
+                  : liveStatus === "cancelled"
+                    ? "Cancelled"
+                    : liveStatus === "on_the_way"
+                      ? "On the way 🛵"
+                      : liveStatus === "preparing"
+                        ? "Preparing 👨‍🍳"
+                        : liveStatus === "accepted"
+                          ? "Accepted"
+                          : "Pending"}
             </span>
           </div>
 
@@ -2040,8 +3093,35 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
             </div>
           )}
 
+          {/* Cancelled banner */}
+          {liveStatus === "cancelled" && (
+            <div
+              style={{
+                background: "var(--red-l)",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "12px 14px",
+                marginBottom: 20,
+              }}
+            >
+              <p
+                style={{
+                  fontWeight: 700,
+                  fontSize: 14,
+                  color: "var(--red)",
+                  marginBottom: 4,
+                }}
+              >
+                Order cancelled
+              </p>
+              <p style={{ fontSize: 13, color: "var(--t2)" }}>
+                You cancelled this order before the restaurant accepted it.
+              </p>
+            </div>
+          )}
+
           {/* Steps */}
-          {liveStatus !== "rejected" && (
+          {liveStatus !== "rejected" && liveStatus !== "cancelled" && (
             <div style={{ marginBottom: 24 }}>
               {steps.map((s, i) => {
                 const n = i + 1,
@@ -2116,8 +3196,8 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
               </div>
             )}
 
-          {/* WhatsApp */}
-          {restaurant?.ph_no && (
+          {/* WhatsApp — hidden once cancelled (nothing to follow up on) */}
+          {restaurant?.ph_no && liveStatus !== "cancelled" && (
             <a
               href={`https://wa.me/${restaurant.ph_no.replace(/\D/g, "")}?text=Hi! My order ID is %23${order?.id}`}
               target="_blank"
@@ -2140,7 +3220,149 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
             </a>
           )}
 
-          {/* Info */}
+          {/* ── Cancel order UI ─────────────────────────────────────────── */}
+
+          {/* Error banner */}
+          {cancelErr && (
+            <div
+              style={{
+                background: "var(--red-l)",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "var(--red)",
+                fontWeight: 500,
+                marginBottom: 12,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>⚠️</span>
+              <span>{cancelErr}</span>
+            </div>
+          )}
+
+          {/* Inline confirm prompt */}
+          {canCancel && showCancelConfirm && (
+            <div
+              style={{
+                background: "#fff8f6",
+                border: "1.5px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "14px 16px",
+                marginBottom: 12,
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--t1)",
+                  marginBottom: 12,
+                }}
+              >
+                Are you sure you want to cancel this order?
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    setShowCancelConfirm(false);
+                    setCancelErr("");
+                  }}
+                  disabled={cancelling}
+                  style={{
+                    flex: 1,
+                    padding: "10px 0",
+                    borderRadius: "var(--r-sm)",
+                    border: "1.5px solid var(--border)",
+                    background: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "var(--t2)",
+                    cursor: cancelling ? "not-allowed" : "pointer",
+                    opacity: cancelling ? 0.6 : 1,
+                  }}
+                >
+                  Keep order
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  style={{
+                    flex: 1,
+                    padding: "10px 0",
+                    borderRadius: "var(--r-sm)",
+                    border: "none",
+                    background: "var(--red)",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#fff",
+                    cursor: cancelling ? "not-allowed" : "pointer",
+                    opacity: cancelling ? 0.7 : 1,
+                  }}
+                >
+                  {cancelling ? "Cancelling…" : "Yes, cancel"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Cancel button — only when still pending and confirm not yet shown */}
+          {canCancel && !showCancelConfirm && (
+            <button
+              onClick={() => {
+                setCancelErr("");
+                setShowCancelConfirm(true);
+              }}
+              style={{
+                width: "100%",
+                padding: "12px 0",
+                borderRadius: "var(--r-sm)",
+                border: "1.5px solid #fca5a5",
+                background: "#fff",
+                fontSize: 13,
+                fontWeight: 700,
+                color: "var(--red)",
+                cursor: "pointer",
+                marginBottom: 12,
+                transition: "background .15s",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--red-l)")
+              }
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+            >
+              ✕ Cancel order
+            </button>
+          )}
+
+          {/* Info notice — cancellation not possible once accepted/beyond */}
+          {isAlreadyAccepted && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                borderRadius: "var(--r-sm)",
+                padding: "10px 14px",
+                fontSize: 12,
+                color: "#1d4ed8",
+                fontWeight: 500,
+                marginBottom: 12,
+              }}
+            >
+              <span>ℹ️</span>
+              <span>
+                Order accepted by restaurant — cancellation not available
+              </span>
+            </div>
+          )}
+
+          {/* Info card */}
           <div
             style={{
               background: "#fafafa",
@@ -2151,6 +3373,23 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
               gap: 10,
             }}
           >
+            {/* Order type pill */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: "3px 10px",
+                  borderRadius: 99,
+                  background:
+                    order?.order_type === "pickup" ? "#ccfbf1" : "#eff6ff",
+                  color: order?.order_type === "pickup" ? "#0f766e" : "#2563eb",
+                  letterSpacing: ".04em",
+                }}
+              >
+                {order?.order_type === "pickup" ? "🏃 Pickup" : "🛵 Delivery"}
+              </span>
+            </div>
             <div style={{ display: "flex", gap: 10 }}>
               <span style={{ fontSize: 16 }}>🏪</span>
               <div>
@@ -2165,7 +3404,8 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
                 )}
               </div>
             </div>
-            {address && (
+            {/* Delivery address — only shown for delivery orders */}
+            {order?.order_type !== "pickup" && address && (
               <div style={{ display: "flex", gap: 10 }}>
                 <span style={{ fontSize: 16 }}>📍</span>
                 <p style={{ fontSize: 12, color: "var(--t2)" }}>
@@ -2176,6 +3416,17 @@ function TrackSheet({ order, restaurant, address, onClose, onStatusUpdate }) {
                   ]
                     .filter(Boolean)
                     .join(", ")}
+                </p>
+              </div>
+            )}
+            {/* Pickup reminder */}
+            {order?.order_type === "pickup" && (
+              <div
+                style={{ display: "flex", gap: 10, alignItems: "flex-start" }}
+              >
+                <span style={{ fontSize: 16 }}>📌</span>
+                <p style={{ fontSize: 12, color: "#0f766e", fontWeight: 600 }}>
+                  Head to the restaurant to collect your order when it's ready.
                 </p>
               </div>
             )}
@@ -2199,6 +3450,7 @@ function ProfileSheet({
   onSetDefault,
   defaultAddrId,
   onLoadOrders,
+  onLogout,
 }) {
   const [tab, setTab] = useState("info");
   const [form, setForm] = useState({
@@ -2207,6 +3459,7 @@ function ProfileSheet({
   });
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState("");
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [selOrder, setSelOrder] = useState(null); // order detail sheet
 
   // Address editing state
@@ -2346,7 +3599,9 @@ function ProfileSheet({
       ? "var(--orange)"
       : s === "delivered"
         ? "var(--green)"
-        : "var(--t3)";
+        : s === "cancelled"
+          ? "var(--red)"
+          : "var(--t3)";
 
   return (
     <>
@@ -2485,6 +3740,120 @@ function ProfileSheet({
               >
                 {saving ? <Spinner size={20} /> : "Save profile"}
               </button>
+              {/* ── Logout ── */}
+              <div
+                style={{
+                  marginTop: 8,
+                  paddingTop: 20,
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {!logoutConfirm ? (
+                  <button
+                    onClick={() => setLogoutConfirm(true)}
+                    style={{
+                      width: "100%",
+                      padding: "11px 0",
+                      borderRadius: "var(--r-sm)",
+                      background: "none",
+                      border: "1.5px solid var(--border)",
+                      color: "var(--t2)",
+                      fontWeight: 600,
+                      fontSize: 14,
+                      cursor: "pointer",
+                      fontFamily: "var(--font)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      transition: "border-color .15s, color .15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "var(--red)";
+                      e.currentTarget.style.color = "var(--red)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "var(--border)";
+                      e.currentTarget.style.color = "var(--t2)";
+                    }}
+                  >
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    Sign out
+                  </button>
+                ) : (
+                  <div
+                    style={{
+                      background: "var(--red-l)",
+                      border: "1px solid #fca5a5",
+                      borderRadius: "var(--r-sm)",
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 14,
+                        color: "var(--red)",
+                        marginBottom: 5,
+                      }}
+                    >
+                      Sign out?
+                    </p>
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "var(--t2)",
+                        marginBottom: 14,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      You'll need to enter your number again to place orders.
+                    </p>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        className="btn-out"
+                        style={{ flex: 1 }}
+                        onClick={() => setLogoutConfirm(false)}
+                      >
+                        Stay
+                      </button>
+                      <button
+                        style={{
+                          flex: 1,
+                          padding: "11px 0",
+                          borderRadius: "var(--r-sm)",
+                          background: "var(--red)",
+                          color: "#fff",
+                          fontWeight: 700,
+                          fontSize: 14,
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: "var(--font)",
+                        }}
+                        onClick={() => {
+                          setLogoutConfirm(false);
+                          if (onLogout) onLogout();
+                        }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -2863,26 +4232,96 @@ function ProfileSheet({
                         className={`order-card${isActive ? " active" : ""}`}
                         onClick={() => setSelOrder(o)}
                       >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
                             {isActive && <span className="active-dot" />}
-                            <span style={{ fontWeight: 700, fontSize: 14 }}>Order #{o.id}</span>
+                            <span style={{ fontWeight: 700, fontSize: 14 }}>
+                              Order #{o.id}
+                            </span>
                           </div>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: statusColor(o.status), background: isActive ? "#fff0e8" : o.status === "delivered" ? "var(--green-l)" : "#f5f5f5", padding: "3px 9px", borderRadius: 99 }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: statusColor(o.status),
+                              background: isActive
+                                ? "#fff0e8"
+                                : o.status === "delivered"
+                                  ? "var(--green-l)"
+                                  : o.status === "cancelled"
+                                    ? "var(--red-l)"
+                                    : "#f5f5f5",
+                              padding: "3px 9px",
+                              borderRadius: 99,
+                            }}
+                          >
                             {statusLabel(o.status)}
                           </span>
                         </div>
-                        <p style={{ fontSize: 13, color: "var(--t2)", marginBottom: 4 }}>
-                          {new Date(o.created_at).toLocaleDateString("en-KW", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        <p
+                          style={{
+                            fontSize: 13,
+                            color: "var(--t2)",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {new Date(o.created_at).toLocaleDateString("en-KW", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </p>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: 13, color: "var(--t3)" }}>{o.payment_method}</span>
-                          <span style={{ fontWeight: 800, fontSize: 15 }}>{fmt(o.total_amount)}</span>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <span style={{ fontSize: 13, color: "var(--t3)" }}>
+                            {o.payment_method}
+                          </span>
+                          <span style={{ fontWeight: 800, fontSize: 15 }}>
+                            {fmt(o.total_amount)}
+                          </span>
                         </div>
                         {o.notes && (
-                          <p style={{ fontSize: 12, color: "var(--t3)", fontStyle: "italic", marginTop: 4 }}>"{o.notes}"</p>
+                          <p
+                            style={{
+                              fontSize: 12,
+                              color: "var(--t3)",
+                              fontStyle: "italic",
+                              marginTop: 4,
+                            }}
+                          >
+                            "{o.notes}"
+                          </p>
                         )}
-                        <p style={{ fontSize: 11, color: "var(--t3)", marginTop: 6, fontWeight: 500 }}>Tap to view details →</p>
+                        <p
+                          style={{
+                            fontSize: 11,
+                            color: "var(--t3)",
+                            marginTop: 6,
+                            fontWeight: 500,
+                          }}
+                        >
+                          Tap to view details →
+                        </p>
                       </div>
                     );
                   })}
@@ -2906,10 +4345,7 @@ function ProfileSheet({
 
       {/* Order detail sheet — stacked on top of ProfileSheet */}
       {selOrder && (
-        <OrderDetailSheet
-          order={selOrder}
-          onClose={() => setSelOrder(null)}
-        />
+        <OrderDetailSheet order={selOrder} onClose={() => setSelOrder(null)} />
       )}
 
       {/* Map picker sheet — stacked on top */}
@@ -2994,7 +4430,11 @@ function DesktopCart({
   customer,
   restId,
 }) {
-  const { subT, delivery, total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
+  const { subT, delivery, total, discountAmt } = calcTotals(
+    cart,
+    addonCart,
+    appliedDiscount,
+  );
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
     cart.reduce((s, c) => s + c.qty, 0) +
@@ -3007,9 +4447,17 @@ function DesktopCart({
 
   const applyCode = async () => {
     const code = codeInput.trim().toUpperCase();
-    if (!code) { setCodeErr("Please enter a discount code."); return; }
-    if (!customer) { setCodeErr("Log in to apply a discount."); return; }
-    setCodeLoading(true); setCodeErr(""); setCodeOk(false);
+    if (!code) {
+      setCodeErr("Please enter a discount code.");
+      return;
+    }
+    if (!customer) {
+      setCodeErr("Log in to apply a discount.");
+      return;
+    }
+    setCodeLoading(true);
+    setCodeErr("");
+    setCodeOk(false);
     try {
       const today = new Date().toISOString().slice(0, 10);
       const { data, error } = await supabase
@@ -3020,14 +4468,34 @@ function DesktopCart({
         .eq("is_active", true)
         .maybeSingle();
       if (error) throw error;
-      if (!data) { setCodeErr("Invalid or inactive discount code."); onApplyDiscount(null); return; }
-      if (data.avail_from && data.avail_from > today) { setCodeErr(`Valid from ${data.avail_from}.`); onApplyDiscount(null); return; }
-      if (data.expiry_date && data.expiry_date < today) { setCodeErr("This code has expired."); onApplyDiscount(null); return; }
+      if (!data) {
+        setCodeErr("Invalid or inactive discount code.");
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.avail_from && data.avail_from > today) {
+        setCodeErr(`Valid from ${data.avail_from}.`);
+        onApplyDiscount(null);
+        return;
+      }
+      if (data.expiry_date && data.expiry_date < today) {
+        setCodeErr("This code has expired.");
+        onApplyDiscount(null);
+        return;
+      }
       if (data.min_order && subT < Number(data.min_order)) {
-        setCodeErr(`Min. order KD ${Number(data.min_order).toFixed(3)} required.`); onApplyDiscount(null); return;
+        setCodeErr(
+          `Min. order KD ${Number(data.min_order).toFixed(3)} required.`,
+        );
+        onApplyDiscount(null);
+        return;
       }
       if (data.max_order && subT > Number(data.max_order)) {
-        setCodeErr(`Code only valid up to KD ${Number(data.max_order).toFixed(3)}.`); onApplyDiscount(null); return;
+        setCodeErr(
+          `Code only valid up to KD ${Number(data.max_order).toFixed(3)}.`,
+        );
+        onApplyDiscount(null);
+        return;
       }
       const { count } = await supabase
         .from("Discount_Redemptions")
@@ -3035,18 +4503,26 @@ function DesktopCart({
         .eq("discount_id", data.id)
         .eq("cust_id", customer.id);
       if (count >= data.max_uses_per_customer) {
-        setCodeErr(`You've already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`);
-        onApplyDiscount(null); return;
+        setCodeErr(
+          `You've already used this code ${count} time${count !== 1 ? "s" : ""} (limit: ${data.max_uses_per_customer}).`,
+        );
+        onApplyDiscount(null);
+        return;
       }
       onApplyDiscount(data);
       setCodeOk(true);
     } catch (e) {
       setCodeErr("Failed to validate code.");
-    } finally { setCodeLoading(false); }
+    } finally {
+      setCodeLoading(false);
+    }
   };
 
   const removeCode = () => {
-    setCodeInput(""); setCodeOk(false); setCodeErr(""); onApplyDiscount(null);
+    setCodeInput("");
+    setCodeOk(false);
+    setCodeErr("");
+    onApplyDiscount(null);
   };
 
   return (
@@ -3062,21 +4538,29 @@ function DesktopCart({
         style={{
           padding: "18px 20px 14px",
           borderBottom: "1px solid var(--border)",
+          background: "var(--card)",
         }}
       >
         <p
           style={{
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: 700,
             color: "var(--t3)",
             textTransform: "uppercase",
-            letterSpacing: ".06em",
-            marginBottom: 2,
+            letterSpacing: ".1em",
+            marginBottom: 3,
           }}
         >
           {restaurant?.name}
         </p>
-        <h3 style={{ fontSize: 18, fontWeight: 800 }}>
+        <h3
+          style={{
+            fontSize: 18,
+            fontWeight: 800,
+            fontFamily: "var(--font-display)",
+            letterSpacing: "-.02em",
+          }}
+        >
           Your order {totalItems > 0 ? `(${totalItems})` : ""}
         </h3>
       </div>
@@ -3257,33 +4741,105 @@ function DesktopCart({
 
             {/* Discount code */}
             <div style={{ marginBottom: 12 }}>
-              <label className="lbl" style={{ fontSize: 10 }}>Discount code <span style={{ textTransform: "none", fontWeight: 400 }}>(optional)</span></label>
+              <label className="lbl" style={{ fontSize: 10 }}>
+                Discount code{" "}
+                <span style={{ textTransform: "none", fontWeight: 400 }}>
+                  (optional)
+                </span>
+              </label>
               {codeOk && appliedDiscount ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: var_r_sm, padding: "8px 12px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    borderRadius: var_r_sm,
+                    padding: "8px 12px",
+                  }}
+                >
                   <span style={{ fontSize: 16 }}>🎉</span>
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontWeight: 800, color: "#15803d", fontSize: 12, margin: 0 }}>{appliedDiscount.code} applied!</p>
-                    <p style={{ color: "#166534", fontSize: 11, margin: "1px 0 0" }}>
-                      {appliedDiscount.type === "percentage" ? `${appliedDiscount.value}%` : `KD ${Number(appliedDiscount.value).toFixed(3)}`} off
+                    <p
+                      style={{
+                        fontWeight: 800,
+                        color: "#15803d",
+                        fontSize: 12,
+                        margin: 0,
+                      }}
+                    >
+                      {appliedDiscount.code} applied!
+                    </p>
+                    <p
+                      style={{
+                        color: "#166534",
+                        fontSize: 11,
+                        margin: "1px 0 0",
+                      }}
+                    >
+                      {appliedDiscount.type === "percentage"
+                        ? `${appliedDiscount.value}%`
+                        : `KD ${Number(appliedDiscount.value).toFixed(3)}`}{" "}
+                      off
                     </p>
                   </div>
-                  <button onClick={removeCode} style={{ background: "none", border: "none", cursor: "pointer", color: "#15803d", fontSize: 16, lineHeight: 1 }}>✕</button>
+                  <button
+                    onClick={removeCode}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#15803d",
+                      fontSize: 16,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 6 }}>
                   <input
-                    className="inp" style={{ flex: 1, fontSize: 12, padding: "8px 10px", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".04em" }}
+                    className="inp"
+                    style={{
+                      flex: 1,
+                      fontSize: 12,
+                      padding: "8px 10px",
+                      textTransform: "uppercase",
+                      fontWeight: 700,
+                      letterSpacing: ".04em",
+                    }}
                     placeholder="Enter code…"
                     value={codeInput}
-                    onChange={e => { setCodeInput(e.target.value.toUpperCase()); setCodeErr(""); }}
-                    onKeyDown={e => e.key === "Enter" && applyCode()}
+                    onChange={(e) => {
+                      setCodeInput(e.target.value.toUpperCase());
+                      setCodeErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && applyCode()}
                   />
-                  <button className="btn-out" onClick={applyCode} disabled={codeLoading} style={{ flexShrink: 0, fontSize: 12, padding: "8px 12px" }}>
+                  <button
+                    className="btn-out"
+                    onClick={applyCode}
+                    disabled={codeLoading}
+                    style={{ flexShrink: 0, fontSize: 12, padding: "8px 12px" }}
+                  >
                     {codeLoading ? "…" : "Apply"}
                   </button>
                 </div>
               )}
-              {codeErr && <p style={{ color: "var(--red)", fontSize: 11, marginTop: 5, fontWeight: 500 }}>⚠️ {codeErr}</p>}
+              {codeErr && (
+                <p
+                  style={{
+                    color: "var(--red)",
+                    fontSize: 11,
+                    marginTop: 5,
+                    fontWeight: 500,
+                  }}
+                >
+                  ⚠️ {codeErr}
+                </p>
+              )}
             </div>
 
             {/* Bill */}
@@ -3304,7 +4860,10 @@ function DesktopCart({
                 <span>{fmt(delivery)}</span>
               </div>
               {discountAmt > 0 && (
-                <div className="sum-row" style={{ fontSize: 13, color: "#15803d", fontWeight: 700 }}>
+                <div
+                  className="sum-row"
+                  style={{ fontSize: 13, color: "#15803d", fontWeight: 700 }}
+                >
                   <span>🏷 Discount</span>
                   <span>−{fmt(discountAmt)}</span>
                 </div>
@@ -3356,9 +4915,12 @@ function DesktopCart({
 
 /* ── MAIN COMPONENT ───────────────────────────────────────────────────────── */
 export default function Customer() {
-  const restId = getRestId();
+  // Resolve slug → numeric restId before anything else
+  const { slug, legacyId } = getRestParam();
 
   /* data state */
+  const [restId, setRestId] = useState(legacyId ? Number(legacyId) : null);
+  const [slugError, setSlugError] = useState(null); // set if slug lookup fails
   const [restaurant, setRestaurant] = useState(null);
   const [categories, setCategories] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
@@ -3390,6 +4952,9 @@ export default function Customer() {
   const [checkoutTotal, setCheckoutTotal] = useState(0);
   const [cartNote, setCartNote] = useState("");
   const [lastOrder, setLastOrder] = useState(null);
+
+  /* order type — "delivery" | "pickup". Resolved at checkout open. */
+  const [orderType, setOrderType] = useState("delivery");
 
   /* discount */
   const [appliedDiscount, setAppliedDiscount] = useState(null); // the validated Discount row
@@ -3424,7 +4989,11 @@ export default function Customer() {
       if (!restId || !menuId) return;
       supabase
         .from("Menu_Events")
-        .insert({ rest_id: Number(restId), menu_id: Number(menuId), event_type: eventType })
+        .insert({
+          rest_id: Number(restId),
+          menu_id: Number(menuId),
+          event_type: eventType,
+        })
         .then(() => {})
         .catch(() => {});
     },
@@ -3442,33 +5011,58 @@ export default function Customer() {
     }
   }, []);
 
-  /* load restaurant + menu */
+  /* resolve slug → restId, then load restaurant + menu */
   useEffect(() => {
-    if (!restId) {
-      setError("No restaurant ID in URL. Use ?rest_id=<id>");
+    // Neither a slug nor a legacy ID was provided
+    if (!slug && !legacyId) {
+      setError("No restaurant found. Please use a valid link.");
       setLoading(false);
       return;
     }
     (async () => {
       try {
+        let resolvedId = restId; // already set if legacyId was in URL
+
+        // If a slug was provided, look up the restaurant by slug first
+        if (slug) {
+          const { data: slugRow, error: slugErr } = await supabase
+            .from("Restaurants")
+            .select("id")
+            .eq("slug", slug)
+            .maybeSingle();
+          if (slugErr) throw new Error("Failed to resolve restaurant link.");
+          if (!slugRow) {
+            setSlugError(`No restaurant found for "${slug}".`);
+            setError(`No restaurant found for "${slug}".`);
+            setLoading(false);
+            return;
+          }
+          resolvedId = slugRow.id;
+          setRestId(resolvedId);
+        }
+
         const [rR, cR, mR, atR] = await Promise.all([
-          supabase.from("Restaurants").select("*").eq("id", restId).single(),
+          supabase
+            .from("Restaurants")
+            .select("*")
+            .eq("id", resolvedId)
+            .single(),
           supabase
             .from("Categories")
             .select("*")
-            .eq("rest_id", restId)
+            .eq("rest_id", resolvedId)
             .eq("visible", true)
             .order("sort_order"),
           supabase
             .from("Menu")
             .select("*")
-            .eq("rest_id", restId)
+            .eq("rest_id", resolvedId)
             .eq("visible", true)
             .order("sort_order"),
           supabase
             .from("Add_Ons_Type")
             .select("id, name, min_qty")
-            .eq("rest_id", restId)
+            .eq("rest_id", resolvedId)
             .order("id"),
         ]);
         if (rR.error || !rR.data) throw new Error("Restaurant not found");
@@ -3492,7 +5086,7 @@ export default function Customer() {
         setLoading(false);
       }
     })();
-  }, [restId]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — slug/legacyId are URL constants
 
   /* load returning customer (per-restaurant key) */
   useEffect(() => {
@@ -3547,7 +5141,9 @@ export default function Customer() {
     try {
       const { data } = await supabase
         .from("Orders")
-        .select("id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone")
+        .select(
+          "id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone",
+        )
         .eq("cust_id", cid)
         .eq("rest_id", restId)
         .order("created_at", { ascending: false })
@@ -3565,19 +5161,57 @@ export default function Customer() {
     if (!customer?.id || !restId) return;
     const ch = supabase
       .channel(`cust-orders-${customer.id}`)
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "Orders",
-        filter: `cust_id=eq.${customer.id}`,
-      }, (payload) => {
-        setOrderHistory((prev) =>
-          prev.map((o) => o.id === payload.new.id ? { ...o, ...payload.new } : o)
-        );
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Orders",
+          filter: `cust_id=eq.${customer.id}`,
+        },
+        (payload) => {
+          setOrderHistory((prev) =>
+            prev.map((o) =>
+              o.id === payload.new.id ? { ...o, ...payload.new } : o,
+            ),
+          );
+        },
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [customer?.id, restId]);
+
+  // Realtime: keep delivery/pickup flags in sync when restaurant toggles them
+  useEffect(() => {
+    if (!restId) return;
+    const ch = supabase
+      .channel(`rest-flags-${restId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Restaurants",
+          filter: `id=eq.${restId}`,
+        },
+        (payload) => {
+          if (!payload.new) return;
+          setRestaurant((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  accept_delivery:
+                    payload.new.accept_delivery ?? prev.accept_delivery,
+                  accept_pickup:
+                    payload.new.accept_pickup ?? prev.accept_pickup,
+                }
+              : prev,
+          );
+        },
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [restId]);
 
   /* filtered menu */
   const filtered = menuItems.filter((m) => {
@@ -3693,7 +5327,10 @@ export default function Customer() {
   /* total = menu items + add-ons + delivery (no VAT) */
   const calcTotals = (cartItems, addonCartItems, appliedDiscount) => {
     const menuSub = cartItems.reduce((s, c) => s + c.unitPrice * c.qty, 0);
-    const addonSub = addonCartItems.reduce((s, a) => s + +a.addon.price * a.qty, 0);
+    const addonSub = addonCartItems.reduce(
+      (s, a) => s + +a.addon.price * a.qty,
+      0,
+    );
     const subT = menuSub + addonSub;
     const delivery = subT > 0 ? 0.5 : 0;
     let discountAmt = 0;
@@ -3706,11 +5343,18 @@ export default function Customer() {
       discountAmt = Math.min(discountAmt, subT);
     }
     const discountedSubT = subT - discountAmt;
-    return { menuSub, addonSub, subT, delivery, discountAmt, total: discountedSubT + delivery };
+    return {
+      menuSub,
+      addonSub,
+      subT,
+      delivery,
+      discountAmt,
+      total: discountedSubT + delivery,
+    };
   };
 
   /* place order — writes Orders + Order_Items + Order_Item_Variants + Order_Item_AddOns */
-  const placeOrder = async ({ address, payMethod, notes }) => {
+  const placeOrder = async ({ address, payMethod, notes, orderType: ot }) => {
     if (!customer || !restaurant) return;
     const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
     try {
@@ -3725,6 +5369,7 @@ export default function Customer() {
           payment_status: "pending",
           payment_method: payMethod,
           notes: notes || "",
+          order_type: ot || "delivery",
         })
         .select()
         .single();
@@ -3805,7 +5450,11 @@ export default function Customer() {
         })
         .eq("id", customer.id);
 
-      setLastOrder({ ...order, deliveryAddress: address });
+      setLastOrder({
+        ...order,
+        order_type: ot || "delivery",
+        deliveryAddress: ot === "pickup" ? null : address,
+      });
       setCart([]);
       setAddonCart([]);
       setCartNote("");
@@ -3899,6 +5548,49 @@ export default function Customer() {
     showToast("Default address updated");
   };
 
+  /* ── Logout: clear localStorage, reset all customer state ── */
+  const handleLogout = () => {
+    try {
+      // Remove the restaurant-specific customer key
+      localStorage.removeItem(custKey(restId));
+      // Also clean up the default address preference for this customer
+      if (customer?.id) {
+        localStorage.removeItem(`frt_def_addr_${customer.id}`);
+      }
+    } catch (e) {
+      // localStorage may be unavailable in private browsing — proceed anyway
+      console.warn("[logout] localStorage error:", e);
+    }
+    // Reset all customer + UI state so PhoneOnboarding is shown
+    setCustomer(null);
+    setAddresses([]);
+    setDefaultAddrId(null);
+    setOrderHistory([]);
+    setCart([]);
+    setAddonCart([]);
+    setCartNote("");
+    setAppliedDiscount(null);
+    setLastOrder(null);
+    setShowCart(false);
+    setShowProfile(false);
+    setShowCheckout(false);
+    setShowTrack(false);
+  };
+
+  // Derived availability flags (default true if columns don't exist yet)
+  const acceptDelivery = restaurant?.accept_delivery ?? true;
+  const acceptPickup = restaurant?.accept_pickup ?? true;
+  const bothOrdersOff = !acceptDelivery && !acceptPickup;
+
+  // Auto-correct orderType if the selected type was just disabled by the restaurant
+  // (effect runs whenever restaurant flags change)
+  useEffect(() => {
+    if (!acceptDelivery && acceptPickup && orderType === "delivery") {
+      setOrderType("pickup");
+    } else if (!acceptPickup && acceptDelivery && orderType === "pickup") {
+      setOrderType("delivery");
+    }
+  }, [acceptDelivery, acceptPickup]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading || !custReady) return <LoadScreen />;
   if (error) return <ErrScreen msg={error} />;
 
@@ -3916,6 +5608,7 @@ export default function Customer() {
   }
 
   const defaultAddr = addresses.find((a) => a.id === defaultAddrId);
+
   const catLabel =
     activeCat === "all"
       ? "All dishes"
@@ -4001,12 +5694,21 @@ export default function Customer() {
               width: 40,
               height: 40,
               borderRadius: "50%",
-              background: "#f5f5f5",
+              background: "var(--bg)",
+              border: "1.5px solid var(--border)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               color: "var(--t2)",
-              transition: "background .15s",
+              transition: "all .18s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--card)";
+              e.currentTarget.style.borderColor = "var(--border-strong)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "var(--bg)";
+              e.currentTarget.style.borderColor = "var(--border)";
             }}
           >
             {Ic.user}
@@ -4018,12 +5720,13 @@ export default function Customer() {
               width: 40,
               height: 40,
               borderRadius: "50%",
-              background: "#f5f5f5",
+              background: cartCount > 0 ? "var(--orange)" : "var(--bg)",
+              border: `1.5px solid ${cartCount > 0 ? "var(--orange)" : "var(--border)"}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "var(--t2)",
-              transition: "background .15s",
+              color: cartCount > 0 ? "#fff" : "var(--t2)",
+              transition: "all .2s",
             }}
           >
             {Ic.cart}
@@ -4048,97 +5751,46 @@ export default function Customer() {
       <div className="page-wrap">
         {/* MAIN COLUMN */}
         <div className="main-col">
-          {/* HERO */}
-          <div className="hero" style={{ height: "clamp(180px, 38vw, 280px)" }}>
-            {restaurant?.image1_path ? (
-              <img
-                src={restaurant.image1_path}
-                alt={restaurant.name}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                onError={(e) => (e.target.style.display = "none")}
-              />
-            ) : (
+          {/* HERO SLIDESHOW */}
+          <HeroSlideshow restaurant={restaurant} />
+
+          {/* RESTAURANT INFO STRIP */}
+          <RestaurantInfoStrip restaurant={restaurant} />
+
+          {/* NOT ACCEPTING ORDERS BANNER */}
+          {restaurant &&
+            !(restaurant.accept_delivery ?? true) &&
+            !(restaurant.accept_pickup ?? true) && (
               <div
                 style={{
-                  width: "100%",
-                  height: "100%",
-                  background: "linear-gradient(135deg,#1a1a1a,#333)",
-                }}
-              />
-            )}
-            <div className="hero-grad" />
-            <div className="hero-content">
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: ".14em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,255,255,.55)",
-                  marginBottom: 4,
+                  margin: "14px 16px 0",
+                  background: "#fff8f0",
+                  border: "1.5px solid #fed7aa",
+                  borderRadius: "var(--r-sm)",
+                  padding: "18px 16px",
+                  textAlign: "center",
                 }}
               >
-                Now open
-              </p>
-              <h1
-                style={{
-                  fontSize: "clamp(18px,4vw,26px)",
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  marginBottom: 10,
-                }}
-              >
-                {restaurant?.name}
-              </h1>
-              <div
-                style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}
-              >
-                {restaurant?.working_hours && (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      fontSize: 12,
-                      color: "rgba(255,255,255,.8)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {Ic.clock} {restaurant.working_hours}
-                  </span>
-                )}
-                {restaurant?.min_order && (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      fontSize: 12,
-                      color: "rgba(255,255,255,.8)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    🔥 Min. {fmt(restaurant.min_order)}
-                  </span>
-                )}
-                <span
+                <div style={{ fontSize: 40, marginBottom: 8 }}>🔕</div>
+                <p
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    fontSize: 12,
-                    color: "rgba(255,255,255,.8)",
-                    fontWeight: 500,
+                    fontWeight: 800,
+                    fontSize: 16,
+                    color: "#92400e",
+                    marginBottom: 4,
                   }}
                 >
-                  {Ic.truck} ~25 min
-                </span>
+                  Not accepting orders right now
+                </p>
+                <p style={{ fontSize: 13, color: "#b45309", lineHeight: 1.5 }}>
+                  We've temporarily paused all orders. Browse our menu and come
+                  back soon!
+                </p>
               </div>
-            </div>
-          </div>
+            )}
 
           {/* SEARCH */}
-          <div style={{ padding: "14px 16px 0", background: "var(--card)" }}>
+          <div style={{ padding: "16px 16px 0", background: "var(--card)" }}>
             <div className="search-bar">
               <span style={{ color: "var(--t3)", flexShrink: 0 }}>
                 {Ic.search}
@@ -4395,12 +6047,14 @@ export default function Customer() {
                   }}
                 >
                   {cat && (
-                    <div style={{ padding: "18px 16px 4px" }}>
+                    <div style={{ padding: "20px 16px 6px" }}>
                       <h2
                         style={{
                           fontSize: 18,
                           fontWeight: 800,
                           color: "var(--t1)",
+                          fontFamily: "var(--font-display)",
+                          letterSpacing: "-.02em",
                         }}
                       >
                         {cat.name}
@@ -4439,7 +6093,16 @@ export default function Customer() {
                     justifyContent: "space-between",
                   }}
                 >
-                  <h2 style={{ fontSize: 18, fontWeight: 800 }}>{catLabel}</h2>
+                  <h2
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 800,
+                      fontFamily: "var(--font-display)",
+                      letterSpacing: "-.02em",
+                    }}
+                  >
+                    {catLabel}
+                  </h2>
                   <span
                     style={{
                       fontSize: 12,
@@ -4490,6 +6153,10 @@ export default function Customer() {
             customer={customer}
             restId={restId}
             onCheckout={(t) => {
+              if (bothOrdersOff) {
+                showToast("We're not accepting orders right now.");
+                return;
+              }
               setCheckoutTotal(t);
               setShowCheckout(true);
             }}
@@ -4565,6 +6232,10 @@ export default function Customer() {
           customer={customer}
           restId={restId}
           onCheckout={(t, n) => {
+            if (bothOrdersOff) {
+              showToast("We're not accepting orders right now.");
+              return;
+            }
             setCheckoutTotal(t);
             setCartNote(n || "");
             setShowCart(false);
@@ -4589,6 +6260,10 @@ export default function Customer() {
             setShowCheckout(false);
             setShowProfile(true);
           }}
+          acceptDelivery={restaurant?.accept_delivery ?? true}
+          acceptPickup={restaurant?.accept_pickup ?? true}
+          orderType={orderType}
+          onOrderTypeChange={setOrderType}
         />
       )}
       {showTrack && lastOrder && (
@@ -4600,6 +6275,18 @@ export default function Customer() {
           onStatusUpdate={(newStatus) => {
             setLastOrder((prev) =>
               prev ? { ...prev, status: newStatus } : prev,
+            );
+          }}
+          onCancelOrder={(orderId) => {
+            // Sync lastOrder so the status badge updates immediately
+            setLastOrder((prev) =>
+              prev ? { ...prev, status: "cancelled" } : prev,
+            );
+            // Sync orderHistory so ProfileSheet reflects the change without a reload
+            setOrderHistory((prev) =>
+              prev.map((o) =>
+                o.id === orderId ? { ...o, status: "cancelled" } : o,
+              ),
             );
           }}
         />
@@ -4617,6 +6304,7 @@ export default function Customer() {
           onSetDefault={setDefaultAddress}
           defaultAddrId={defaultAddrId}
           onLoadOrders={() => loadOrderHistory(customer?.id)}
+          onLogout={handleLogout}
         />
       )}
     </>
@@ -4628,54 +6316,91 @@ function OrderDetailSheet({ order, onClose }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [liveOrder, setLiveOrder] = useState(order);
+  const [discount, setDiscount] = useState(null); // {code, type, value, amount_saved} | null
 
   // Realtime status updates while sheet is open
   useEffect(() => {
     if (!order?.id) return;
     const ch = supabase
       .channel(`ord-detail-${order.id}`)
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "Orders",
-        filter: `id=eq.${order.id}`,
-      }, (payload) => {
-        setLiveOrder((prev) => ({ ...prev, ...payload.new }));
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "Orders",
+          filter: `id=eq.${order.id}`,
+        },
+        (payload) => {
+          setLiveOrder((prev) => ({ ...prev, ...payload.new }));
+        },
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [order?.id]);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
 
+  // Fetch order items + variants
   useEffect(() => {
     (async () => {
       try {
         const { data, error } = await supabase
           .from("Order_Items")
-          .select("id, menu_id, quantity, unit_price, subtotal, item_note, Menu(name)")
+          .select(
+            "id, menu_id, quantity, unit_price, subtotal, item_note, Menu(name)",
+          )
           .eq("order_id", order.id);
         if (error) throw error;
-        // Fetch variant options per item
-        const enriched = await Promise.all((data || []).map(async (it) => {
-          const { data: vars } = await supabase
-            .from("Order_Item_Variants")
-            .select(`price_adj, "Variant Options"(name)`)
-            .eq("order_item_id", it.id);
-          return {
-            ...it,
-            menuName: it.Menu?.name || "Item",
-            variants: (vars || []).map((v) => v["Variant Options"]?.name).filter(Boolean),
-          };
-        }));
+        const enriched = await Promise.all(
+          (data || []).map(async (it) => {
+            const { data: vars } = await supabase
+              .from("Order_Item_Variants")
+              .select(`price_adj, "Variant Options"(name)`)
+              .eq("order_item_id", it.id);
+            return {
+              ...it,
+              menuName: it.Menu?.name || "Item",
+              variants: (vars || [])
+                .map((v) => v["Variant Options"]?.name)
+                .filter(Boolean),
+            };
+          }),
+        );
         setItems(enriched);
       } catch (e) {
         console.error("[OrderDetailSheet]", e);
       } finally {
         setLoading(false);
+      }
+    })();
+  }, [order.id]);
+
+  // Fetch discount redemption for this order (silent fail if table doesn't exist yet)
+  useEffect(() => {
+    if (!order?.id) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("Discount_Redemptions")
+          .select("amount_saved, Discounts(code, type, value)")
+          .eq("order_id", order.id)
+          .maybeSingle();
+        if (data) {
+          setDiscount({
+            code: data.Discounts?.code || "—",
+            type: data.Discounts?.type || "fixed",
+            value: data.Discounts?.value ?? 0,
+            amount_saved: Number(data.amount_saved || 0),
+          });
+        }
+      } catch (e) {
+        // Table may not exist yet — fail silently
       }
     })();
   }, [order.id]);
@@ -4687,6 +6412,7 @@ function OrderDetailSheet({ order, onClose }) {
     on_the_way: "On the way 🛵",
     delivered: "Delivered ✅",
     rejected: "Rejected",
+    cancelled: "Cancelled",
   };
   const STATUS_COLORS = {
     pending: "var(--orange)",
@@ -4695,46 +6421,165 @@ function OrderDetailSheet({ order, onClose }) {
     on_the_way: "var(--green)",
     delivered: "var(--green)",
     rejected: "var(--red)",
+    cancelled: "var(--red)",
   };
 
   const ACTIVE = ["pending", "accepted", "preparing", "on_the_way"];
   const isActive = ACTIVE.includes(liveOrder.status);
 
+  // Cancellation logic
+  // Only cancellable if order is still pending (restaurant hasn't accepted yet)
+  const canCancel = liveOrder.status === "pending";
+  const isCancelled = liveOrder.status === "cancelled";
+  const isAlreadyClosedForCancel = [
+    "accepted",
+    "preparing",
+    "on_the_way",
+    "delivered",
+    "rejected",
+  ].includes(liveOrder.status);
+
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState("");
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    setCancelErr("");
+    try {
+      const { error } = await supabase
+        .from("Orders")
+        .update({ status: "cancelled" })
+        .eq("id", liveOrder.id)
+        .eq("status", "pending"); // safety: only cancel if still pending
+      if (error) throw error;
+      // Verify the update happened (status may have changed server-side)
+      const { data: fresh } = await supabase
+        .from("Orders")
+        .select("status")
+        .eq("id", liveOrder.id)
+        .single();
+      if (fresh?.status !== "cancelled") {
+        setCancelErr(
+          "Your order was already accepted by the restaurant and can no longer be cancelled.",
+        );
+      } else {
+        setLiveOrder((prev) => ({ ...prev, status: "cancelled" }));
+      }
+    } catch (e) {
+      setCancelErr("Failed to cancel order. Please try again.");
+    } finally {
+      setCancelling(false);
+      setShowCancelConfirm(false);
+    }
+  };
+
+  // Computed breakdown values
+  const itemsSubtotal = items.reduce(
+    (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
+    0,
+  );
+  const deliveryFee = 0.5;
+  const discountAmt = discount?.amount_saved ?? 0;
+
   return (
     <>
       <div className="overlay" onClick={onClose} />
-      <div className="sheet" style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}>
+      <div
+        className="sheet"
+        style={{ paddingBottom: 0, display: "flex", flexDirection: "column" }}
+      >
         <div className="drag-pill" />
         {/* Header */}
         <div className="sheet-hd" style={{ paddingBottom: 10, flexShrink: 0 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p className="sheet-title" style={{ fontSize: 17 }}>Order #{liveOrder.id}</p>
+            <p className="sheet-title" style={{ fontSize: 17 }}>
+              Order #{liveOrder.id}
+            </p>
             <p style={{ fontSize: 12, color: "var(--t3)", marginTop: 2 }}>
-              {new Date(liveOrder.created_at).toLocaleString("en-KW", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              {new Date(liveOrder.created_at).toLocaleString("en-KW", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 99, background: isActive ? "#fff0e8" : liveOrder.status === "delivered" ? "#f0fdf4" : "#f5f5f5", color: STATUS_COLORS[liveOrder.status] || "var(--t2)" }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 99,
+                background: isActive
+                  ? "#fff0e8"
+                  : liveOrder.status === "delivered"
+                    ? "#f0fdf4"
+                    : liveOrder.status === "cancelled"
+                      ? "#fdecea"
+                      : "#f5f5f5",
+                color: STATUS_COLORS[liveOrder.status] || "var(--t2)",
+              }}
+            >
               {isActive && <span className="active-dot" />}
               {STATUS_LABELS[liveOrder.status] || liveOrder.status}
             </span>
-            <button className="close-btn" onClick={onClose}>{Ic.close}</button>
+            <button className="close-btn" onClick={onClose}>
+              {Ic.close}
+            </button>
           </div>
         </div>
 
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0 20px" }}>
-
-          {/* Rider info — highlighted */}
-          {(liveOrder.delivery_rider_name) && (
+          {/* Rider info */}
+          {liveOrder.delivery_rider_name && (
             <div className="rider-card" style={{ marginBottom: 16 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>🛵 Delivery Rider</p>
-              <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{liveOrder.delivery_rider_name}</p>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--green)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".08em",
+                  marginBottom: 8,
+                }}
+              >
+                🛵 Delivery Rider
+              </p>
+              <p style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>
+                {liveOrder.delivery_rider_name}
+              </p>
               {liveOrder.delivery_rider_phone && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-                  <p style={{ fontSize: 14, color: "var(--t2)" }}>{liveOrder.delivery_rider_phone}</p>
-                  <a href={`https://wa.me/${liveOrder.delivery_rider_phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
-                    style={{ background: "#25D366", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginTop: 6,
+                  }}
+                >
+                  <p style={{ fontSize: 14, color: "var(--t2)" }}>
+                    {liveOrder.delivery_rider_phone}
+                  </p>
+                  <a
+                    href={`https://wa.me/${liveOrder.delivery_rider_phone.replace(/\D/g, "")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      background: "#25D366",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     💬 WhatsApp
                   </a>
                 </div>
@@ -4743,29 +6588,71 @@ function OrderDetailSheet({ order, onClose }) {
           )}
 
           {/* Order items */}
-          <p style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Items</p>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--t3)",
+              textTransform: "uppercase",
+              letterSpacing: ".08em",
+              marginBottom: 4,
+            }}
+          >
+            Items
+          </p>
           {loading ? (
-            <div style={{ display: "flex", justifyContent: "center", padding: "20px 0" }}><Spinner size={24} /></div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                padding: "20px 0",
+              }}
+            >
+              <Spinner size={24} />
+            </div>
           ) : items.length === 0 ? (
-            <p style={{ color: "var(--t3)", fontSize: 13, padding: "12px 0" }}>No items found</p>
+            <p style={{ color: "var(--t3)", fontSize: 13, padding: "12px 0" }}>
+              No items found
+            </p>
           ) : (
             <div style={{ marginBottom: 16 }}>
               {items.map((it, i) => (
                 <div key={i} className="order-detail-row">
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontWeight: 600, fontSize: 14 }}>{it.menuName}</p>
+                    <p style={{ fontWeight: 600, fontSize: 14 }}>
+                      {it.menuName}
+                    </p>
                     {it.variants?.length > 0 && (
-                      <p style={{ fontSize: 12, color: "var(--orange)", marginTop: 2 }}>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "var(--orange)",
+                          marginTop: 2,
+                        }}
+                      >
                         {it.variants.join(" · ")}
                       </p>
                     )}
                     {it.item_note && (
-                      <p style={{ fontSize: 11, color: "var(--t3)", fontStyle: "italic", marginTop: 2 }}>📝 {it.item_note}</p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: "var(--t3)",
+                          fontStyle: "italic",
+                          marginTop: 2,
+                        }}
+                      >
+                        📝 {it.item_note}
+                      </p>
                     )}
                   </div>
                   <div style={{ flexShrink: 0, textAlign: "right" }}>
-                    <p style={{ fontSize: 13, color: "var(--t2)" }}>×{it.quantity}</p>
-                    <p style={{ fontSize: 14, fontWeight: 700 }}>{fmt(it.subtotal)}</p>
+                    <p style={{ fontSize: 13, color: "var(--t2)" }}>
+                      ×{it.quantity}
+                    </p>
+                    <p style={{ fontSize: 14, fontWeight: 700 }}>
+                      {fmt(it.subtotal)}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -4774,28 +6661,320 @@ function OrderDetailSheet({ order, onClose }) {
 
           {/* Customer note */}
           {liveOrder.notes && (
-            <div style={{ background: "#fafafa", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: "12px 14px", marginBottom: 16 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Your note</p>
-              <p style={{ fontSize: 13, color: "var(--t2)", fontStyle: "italic" }}>{liveOrder.notes}</p>
+            <div
+              style={{
+                background: "#fafafa",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-sm)",
+                padding: "12px 14px",
+                marginBottom: 16,
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--t3)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".08em",
+                  marginBottom: 6,
+                }}
+              >
+                Your note
+              </p>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--t2)",
+                  fontStyle: "italic",
+                }}
+              >
+                {liveOrder.notes}
+              </p>
             </div>
           )}
 
-          {/* Order summary */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginBottom: 24 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          {/* Price breakdown */}
+          <div
+            style={{
+              background: "#fafafa",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r)",
+              padding: "14px 16px",
+              marginBottom: 24,
+            }}
+          >
+            {/* Payment method */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 10,
+                paddingBottom: 10,
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
               <span style={{ fontSize: 13, color: "var(--t2)" }}>Payment</span>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{liveOrder.payment_method}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                {liveOrder.payment_method}
+              </span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
+
+            {/* Items subtotal — only when loaded */}
+            {!loading && items.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 13, color: "var(--t2)" }}>
+                  Items subtotal
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>
+                  {fmt(itemsSubtotal)}
+                </span>
+              </div>
+            )}
+
+            {/* Delivery fee */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <span style={{ fontSize: 13, color: "var(--t2)" }}>
+                Delivery fee
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>
+                {fmt(deliveryFee)}
+              </span>
+            </div>
+
+            {/* Discount row — only shown when a redemption exists */}
+            {discount && discountAmt > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "var(--green)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  🏷️
+                  <span
+                    style={{
+                      background: "#dcfce7",
+                      border: "1px solid #bbf7d0",
+                      color: "#15803d",
+                      borderRadius: 999,
+                      padding: "1px 8px",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: ".04em",
+                    }}
+                  >
+                    {discount.code}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--t3)" }}>
+                    (
+                    {discount.type === "percentage"
+                      ? `${discount.value}% off`
+                      : `KD ${Number(discount.value).toFixed(3)} off`}
+                    )
+                  </span>
+                </span>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "var(--green)",
+                  }}
+                >
+                  −{fmt(discountAmt)}
+                </span>
+              </div>
+            )}
+
+            {/* Grand total */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                paddingTop: 10,
+                borderTop: "1px solid var(--border)",
+                marginTop: 2,
+              }}
+            >
               <span style={{ fontSize: 15, fontWeight: 700 }}>Total</span>
-              <span style={{ fontSize: 16, fontWeight: 800, color: "var(--orange)" }}>{fmt(liveOrder.total_amount)}</span>
+              <span
+                style={{
+                  fontSize: 16,
+                  fontWeight: 800,
+                  color: "var(--orange)",
+                }}
+              >
+                {fmt(liveOrder.total_amount)}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Close footer */}
-        <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))", flexShrink: 0 }}>
-          <button className="btn-out" style={{ width: "100%", justifyContent: "center" }} onClick={onClose}>Close</button>
+        {/* Close / Cancel footer */}
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: "1px solid var(--border)",
+            paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))",
+            flexShrink: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          {/* Cancel error */}
+          {cancelErr && (
+            <div
+              style={{
+                background: "#fdecea",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "10px 14px",
+                fontSize: 13,
+                color: "var(--red)",
+                fontWeight: 500,
+              }}
+            >
+              ⚠️ {cancelErr}
+            </div>
+          )}
+
+          {/* Cancel confirm prompt */}
+          {showCancelConfirm && (
+            <div
+              style={{
+                background: "#fdecea",
+                border: "1px solid #fca5a5",
+                borderRadius: "var(--r-sm)",
+                padding: "12px 14px",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--red)",
+                  marginBottom: 8,
+                }}
+              >
+                Cancel this order?
+              </p>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--t2)",
+                  marginBottom: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                This cannot be undone. The restaurant will be notified.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn-out"
+                  style={{ flex: 1 }}
+                  onClick={() => setShowCancelConfirm(false)}
+                  disabled={cancelling}
+                >
+                  Keep order
+                </button>
+                <button
+                  style={{
+                    flex: 1,
+                    padding: "11px 0",
+                    borderRadius: "var(--r-sm)",
+                    background: "var(--red)",
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    border: "none",
+                    cursor: cancelling ? "not-allowed" : "pointer",
+                    opacity: cancelling ? 0.7 : 1,
+                    fontFamily: "var(--font)",
+                  }}
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                >
+                  {cancelling ? "Cancelling…" : "Yes, cancel"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10 }}>
+            {/* Show cancel button only if order is still pending */}
+            {canCancel && !showCancelConfirm && (
+              <button
+                style={{
+                  flex: 1,
+                  padding: "11px 0",
+                  borderRadius: "var(--r-sm)",
+                  background: "none",
+                  border: "1.5px solid var(--red)",
+                  color: "var(--red)",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  fontFamily: "var(--font)",
+                  transition: "opacity .15s",
+                }}
+                onClick={() => {
+                  setCancelErr("");
+                  setShowCancelConfirm(true);
+                }}
+              >
+                ✕ Cancel order
+              </button>
+            )}
+            {/* Informational notice if order was accepted and cannot be cancelled */}
+            {isAlreadyClosedForCancel && !isCancelled && (
+              <div
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: "var(--r-sm)",
+                  background: "#f0f4ff",
+                  border: "1px solid #bfdbfe",
+                  fontSize: 12,
+                  color: "#2563EB",
+                  fontWeight: 500,
+                  textAlign: "center",
+                }}
+              >
+                ℹ️ Order accepted — cancellation not available
+              </div>
+            )}
+            <button
+              className="btn-out"
+              style={{ flex: 1, justifyContent: "center" }}
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </>
