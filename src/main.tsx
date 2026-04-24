@@ -5,6 +5,8 @@ import Login from "./Login.jsx";
 import LandingApp from "./app/App.tsx";
 import Dashboard from "./Dashboard.jsx";
 import Customer from "./Customer.jsx";
+import Onboard from "./Onboard.jsx";
+
 import { supabase } from "./supabaseClient";
 import "./styles/index.css";
 import "./index.css";
@@ -12,18 +14,18 @@ import "./index.css";
 function AppRoutes() {
   const navigate = useNavigate();
 
-  // 1. Create a state to hold the user. 
+  // 1. Create a state to hold the user.
   // It checks localStorage first so it survives page refreshes!
   const [loggedInUser, setLoggedInUser] = useState(() => {
     const savedUser = sessionStorage.getItem("ungrie_user");
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
-  const handleUserLogin = (userData) => {    
+  const handleUserLogin = (userData) => {
     // 2. Save the user to our state AND to the browser memory
     setLoggedInUser(userData);
     sessionStorage.setItem("ungrie_user", JSON.stringify(userData));
-    navigate("/dashboard"); 
+    navigate("/dashboard");
   };
 
   const handleLogout = async () => {
@@ -31,7 +33,7 @@ function AppRoutes() {
       await supabase.auth.signOut();
       sessionStorage.removeItem("ungrie_user");
       setLoggedInUser(null); // Clears the React state
-      navigate("/login"); 
+      navigate("/login");
     } catch (error) {
       console.error("Error signing out:", error);
     }
@@ -41,11 +43,15 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingApp />} />
       <Route path="/login" element={<Login onLogin={handleUserLogin} />} />
-      
+
       {/* 3. Pass the loggedInUser down into the Dashboard! */}
       {/* Note: Change 'user' to whatever prop name your Dashboard expects */}
-      <Route path="/dashboard" element={<Dashboard user={loggedInUser} onLogout={handleLogout} />} />
+      <Route
+        path="/dashboard"
+        element={<Dashboard user={loggedInUser} onLogout={handleLogout} />}
+      />
       <Route path="/customer" element={<Customer />} />
+      <Route path="/onboard" element={<Onboard />} />
     </Routes>
   );
 }
@@ -55,5 +61,5 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <AppRoutes />
     </BrowserRouter>
-  </StrictMode>
+  </StrictMode>,
 );
