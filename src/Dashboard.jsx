@@ -14028,19 +14028,27 @@ function MenuPage({ t, user }) {
 }
 
 // ─── CancellationsPage ────────────────────────────────────────────────────────
-function CancellationsPage({ t, user }) {
+// Pickup row teal tokens (light / dark friendly)
+const PICKUP_LIGHT = { bg: "rgba(20,184,166,0.07)", border: "rgba(20,184,166,0.22)", text: "#0d9488" };
+const PICKUP_DARK  = { bg: "rgba(20,184,166,0.10)", border: "rgba(20,184,166,0.28)", text: "#2dd4bf" };
+
+function CancellationsPage({ t, user, darkMode }) {
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all"); // "all" | "delivery" | "pickup"
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 20;
+  const pk = darkMode ? PICKUP_DARK : PICKUP_LIGHT;
 
   useEffect(() => {
     if (!restId) { setLoading(false); return; }
+    setError(null);
     (async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error: dbErr } = await supabase
           .from("Orders")
           .select(
             `id, status, total_amount, payment_method, payment_status, notes, created_at,
@@ -14049,10 +14057,11 @@ function CancellationsPage({ t, user }) {
           .eq("rest_id", restId)
           .eq("status", "cancelled")
           .order("created_at", { ascending: false });
-        if (error) throw error;
+        if (dbErr) throw dbErr;
         setOrders(data || []);
       } catch (e) {
         console.error("[CancellationsPage]", e);
+        setError("Failed to load cancellations. Please refresh.");
       } finally {
         setLoading(false);
       }
@@ -14066,12 +14075,7 @@ function CancellationsPage({ t, user }) {
       .channel(`cancellations-${restId}`)
       .on(
         "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "Orders",
-          filter: `rest_id=eq.${restId}`,
-        },
+        { event: "UPDATE", schema: "public", table: "Orders", filter: `rest_id=eq.${restId}` },
         (payload) => {
           if (payload.new?.status === "cancelled") {
             setOrders((prev) => {
@@ -14086,18 +14090,44 @@ function CancellationsPage({ t, user }) {
   }, [restId]);
 
   const filtered = orders.filter((o) => {
+    // type filter
+    if (typeFilter === "delivery" && o.order_type !== "delivery") return false;
+    if (typeFilter === "pickup"   && o.order_type !== "pickup")   return false;
+    // text search
     if (!search) return true;
     const q = search.toLowerCase();
     return (
       String(o.id).includes(q) ||
       (o.Customer?.cust_name || "").toLowerCase().includes(q) ||
       (o.Customer?.ph_num || "").includes(q) ||
-      (o.payment_method || "").toLowerCase().includes(q)
+      (o.payment_method || "").toLowerCase().includes(q) ||
+      (o.order_type || "").toLowerCase().includes(q)
     );
   });
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const filterBtnStyle = (active) => ({
+    fontFamily: "'Lato', sans-serif",
+    fontWeight: 600,
+    fontSize: 12,
+    padding: "8px 16px",
+    borderRadius: 8,
+    cursor: "pointer",
+    border: active ? `1px solid ${t.accentBorder}` : `1px solid ${t.border2}`,
+    background: active ? t.accentBg : t.surface2,
+    color: active ? t.accent : t.subtle,
+    transition: "all 0.15s",
+    whiteSpace: "nowrap",
+  });
+
+  const noResultMsg = () => {
+    if (search && typeFilter !== "all") return "No cancellations match your search and filter.";
+    if (search) return "No cancellations match your search.";
+    if (typeFilter !== "all") return `No ${typeFilter} cancellations found.`;
+    return "No cancellations yet.";
+  };
 
   return (
     <div style={{ padding: "20px 24px 40px" }}>
@@ -14106,7 +14136,8 @@ function CancellationsPage({ t, user }) {
         .cancel-table th { padding: 13px 16px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; font-family: 'Lato', sans-serif; }
         .cancel-table td { padding: 13px 16px; font-size: 13px; vertical-align: middle; border-bottom: 1px solid; white-space: nowrap; font-family: 'Lato', sans-serif; }
         .cancel-table tr:last-child td { border-bottom: none; }
-        .cancel-table tbody tr:hover td { filter: brightness(0.97); }
+        .cancel-table tbody tr.pickup-row:hover td { filter: brightness(0.96); }
+        .cancel-table tbody tr:not(.pickup-row):hover td { filter: brightness(0.97); }
         @media(max-width:640px){ .cancel-table th, .cancel-table td { padding: 10px 11px; font-size: 12px; } }
       `}</style>
 
@@ -14121,16 +14152,17 @@ function CancellationsPage({ t, user }) {
         Orders cancelled by customers before being accepted.
       </p>
 
-      {/* Search */}
+      {/* Search + Filters */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: "1 1 260px", minWidth: 0 }}>
+        {/* Search input */}
+        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 0 }}>
           <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", opacity: 0.4, fontSize: 14 }}>
             🔍
           </span>
           <input
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            placeholder="Search Table...."
+            placeholder="Search by ID, name, phone, payment…"
             style={{
               width: "100%",
               paddingLeft: 36,
@@ -14148,7 +14180,36 @@ function CancellationsPage({ t, user }) {
             }}
           />
         </div>
+
+        {/* Order type filter pills */}
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {[["all", "All"], ["delivery", "🚴 Delivery"], ["pickup", "🛍️ Pickup"]].map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => { setTypeFilter(val); setPage(0); }}
+              style={filterBtnStyle(typeFilter === val)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Error state */}
+      {error && (
+        <div style={{
+          background: "rgba(184,50,50,0.08)",
+          border: "1px solid rgba(184,50,50,0.25)",
+          borderRadius: 10,
+          padding: "12px 16px",
+          marginBottom: 16,
+          color: "#B83232",
+          fontFamily: "'Lato', sans-serif",
+          fontSize: 13,
+        }}>
+          ⚠️ {error}
+        </div>
+      )}
 
       {/* Table */}
       {loading ? (
@@ -14183,33 +14244,56 @@ function CancellationsPage({ t, user }) {
                         fontSize: 13,
                       }}
                     >
-                      {search ? "No cancellations match your search." : "No results."}
+                      {noResultMsg()}
                     </td>
                   </tr>
                 ) : (
-                  paginated.map((o) => (
-                    <tr key={o.id}>
-                      <td style={{ color: t.text, fontWeight: 700, borderBottomColor: t.border }}>
-                        #{o.id}
-                      </td>
-                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
-                        Delivery
-                      </td>
-                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
-                        {fmtDate(o.created_at)}
-                      </td>
-                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
-                        {o.Customer?.ph_num || "—"}
-                      </td>
-                      <td style={{ color: t.text, fontWeight: 600, borderBottomColor: t.border }}>
-                        {o.Customer?.cust_name || "—"}
-                      </td>
-                      <td style={{ color: t.subtle, borderBottomColor: t.border }}>
-                        {o.payment_method || "—"}
-                      </td>
-                      <td style={{ borderBottomColor: t.border }}>
-                        <span
-                          style={{
+                  paginated.map((o) => {
+                    const isPickup = o.order_type === "pickup";
+                    const rowBg = isPickup ? pk.bg : "transparent";
+                    const rowBorderColor = isPickup ? pk.border : t.border;
+                    return (
+                      <tr key={o.id} className={isPickup ? "pickup-row" : ""} style={{ background: rowBg }}>
+                        <td style={{ color: t.text, fontWeight: 700, borderBottomColor: rowBorderColor }}>
+                          #{o.id}
+                        </td>
+                        <td style={{ borderBottomColor: rowBorderColor }}>
+                          {isPickup ? (
+                            <span style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
+                              background: pk.bg,
+                              border: `1px solid ${pk.border}`,
+                              color: pk.text,
+                              fontFamily: "'Lato', sans-serif",
+                              fontWeight: 700,
+                              fontSize: 11,
+                              padding: "3px 10px",
+                              borderRadius: 99,
+                            }}>
+                              🛍️ Pickup
+                            </span>
+                          ) : (
+                            <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                              🚴 Delivery
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ color: t.subtle, borderBottomColor: rowBorderColor }}>
+                          {fmtDate(o.created_at)}
+                        </td>
+                        <td style={{ color: t.subtle, borderBottomColor: rowBorderColor }}>
+                          {o.Customer?.ph_num || "—"}
+                        </td>
+                        <td style={{ color: t.text, fontWeight: 600, borderBottomColor: rowBorderColor }}>
+                          {o.Customer?.cust_name || "—"}
+                        </td>
+                        <td style={{ color: t.subtle, borderBottomColor: rowBorderColor }}>
+                          {o.payment_method || "—"}
+                        </td>
+                        <td style={{ borderBottomColor: rowBorderColor }}>
+                          <span style={{
                             background: "rgba(184,50,50,0.08)",
                             color: "#B83232",
                             fontFamily: "'Lato', sans-serif",
@@ -14217,26 +14301,31 @@ function CancellationsPage({ t, user }) {
                             fontSize: 11,
                             padding: "3px 10px",
                             borderRadius: 99,
-                          }}
-                        >
-                          Cancelled
-                        </span>
-                      </td>
-                      <td style={{ color: t.accent, fontWeight: 700, borderBottomColor: t.border }}>
-                        {fmtKD(o.total_amount)}
-                      </td>
-                      <td style={{ borderBottomColor: t.border }}>
-                        <CancelOrderDetailButton order={o} t={t} />
-                      </td>
-                    </tr>
-                  ))
+                          }}>
+                            Cancelled
+                          </span>
+                        </td>
+                        <td style={{ color: t.accent, fontWeight: 700, borderBottomColor: rowBorderColor }}>
+                          {fmtKD(o.total_amount)}
+                        </td>
+                        <td style={{ borderBottomColor: rowBorderColor }}>
+                          <CancelOrderDetailButton order={o} t={t} darkMode={darkMode} />
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
           {/* Pagination */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, alignItems: "center", flexWrap: "wrap" }}>
+            {filtered.length > 0 && (
+              <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginRight: "auto" }}>
+                Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length} cancellation{filtered.length !== 1 ? "s" : ""}
+              </p>
+            )}
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
@@ -14274,12 +14363,6 @@ function CancellationsPage({ t, user }) {
               Next
             </button>
           </div>
-
-          {filtered.length > 0 && (
-            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginTop: 8, textAlign: "right" }}>
-              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length} cancellation{filtered.length !== 1 ? "s" : ""}
-            </p>
-          )}
         </>
       )}
     </div>
@@ -14287,7 +14370,7 @@ function CancellationsPage({ t, user }) {
 }
 
 // ─── CancelOrderDetailButton — portal-based modal with full price breakdown ────
-function CancelOrderDetailButton({ order, t }) {
+function CancelOrderDetailButton({ order, t, darkMode }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [discount, setDiscount] = useState(null);
@@ -14390,7 +14473,41 @@ function CancelOrderDetailButton({ order, t }) {
               {fmtDate(order.created_at)}
             </p>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {/* Order type badge */}
+            {(() => {
+              const pk = darkMode ? PICKUP_DARK : PICKUP_LIGHT;
+              const isPickup = order.order_type === "pickup";
+              return isPickup ? (
+                <span style={{
+                  background: pk.bg,
+                  color: pk.text,
+                  border: `1px solid ${pk.border}`,
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 11,
+                  padding: "4px 11px",
+                  borderRadius: 99,
+                  letterSpacing: ".04em",
+                }}>
+                  🛍️ Pickup
+                </span>
+              ) : (
+                <span style={{
+                  background: t.surface2,
+                  color: t.subtle,
+                  border: `1px solid ${t.border2}`,
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 600,
+                  fontSize: 11,
+                  padding: "4px 11px",
+                  borderRadius: 99,
+                  letterSpacing: ".04em",
+                }}>
+                  🚴 Delivery
+                </span>
+              );
+            })()}
             <span style={{
               background: "rgba(184,50,50,0.10)",
               color: "#B83232",
@@ -14493,11 +14610,13 @@ function CancelOrderDetailButton({ order, t }) {
             </div>
           )}
 
-          {/* Delivery fee */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: discountAmt > 0 ? 8 : 0 }}>
-            <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Delivery fee</span>
-            <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(deliveryFee)}</span>
-          </div>
+          {/* Delivery fee — only for delivery orders */}
+          {order.order_type !== "pickup" && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: discountAmt > 0 ? 8 : 0 }}>
+              <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Delivery fee</span>
+              <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(deliveryFee)}</span>
+            </div>
+          )}
 
           {/* Discount row — only if coupon was applied */}
           {discount && discountAmt > 0 && (
@@ -14681,7 +14800,7 @@ export default function Dashboard({ user, onLogout }) {
       case "discounts":
         return <DiscountsPage t={t} user={user} />;
       case "cancellations":
-        return <CancellationsPage t={t} user={user} />;
+        return <CancellationsPage t={t} user={user} darkMode={darkMode} />;
       default:
         return (
           <div className="p-8 flex items-center justify-center min-h-[50vh]">
