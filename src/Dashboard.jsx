@@ -740,7 +740,7 @@ function RankBars({ items, color, t, emptyMsg = "No data for this period" }) {
 }
 
 // ── Home Page ─────────────────────────────────────────────────────────────────
-function HomePage({ t, user }) {
+function HomePage({ t, user, setActiveNav }) {
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
 
   const [period, setPeriod] = useState("Today");
@@ -767,6 +767,8 @@ function HomePage({ t, user }) {
   const [payBreakdown, setPayBreakdown] = useState([]); // [{method, count, total}]
   const [topViewed, setTopViewed] = useState([]);
   const [topAdded, setTopAdded] = useState([]);
+  const [orderTypeSplit, setOrderTypeSplit] = useState({ delivery: 0, pickup: 0 }); // delivery vs pickup counts
+  const [hourlyData, setHourlyData] = useState([]); // [{hour: 0-23, count}]
 
   // ── fetch ──────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -795,7 +797,7 @@ function HomePage({ t, user }) {
       // 2. All orders in period for THIS restaurant
       const { data: orders, error: oErr } = await supabase
         .from("Orders")
-        .select("id, status, total_amount, payment_method, cust_id, created_at")
+        .select("id, status, total_amount, payment_method, cust_id, created_at, order_type")
         .eq("rest_id", restId)
         .gte("created_at", fromISO)
         .lte("created_at", toISO);
@@ -830,6 +832,24 @@ function HomePage({ t, user }) {
         pending: pending.length,
         avgOrder: `KD ${avgOrder}`,
       });
+
+      // Order type split (from ALL orders in period — accepted only)
+      const deliveryCount = accepted.filter((o) => (o.order_type || "delivery") === "delivery").length;
+      const pickupCount   = accepted.filter((o) => o.order_type === "pickup").length;
+      setOrderTypeSplit({ delivery: deliveryCount, pickup: pickupCount });
+
+      // Hourly distribution (accepted orders, by local hour)
+      const hourMap = {};
+      for (let h = 0; h < 24; h++) hourMap[h] = 0;
+      accepted.forEach((o) => {
+        try {
+          const hr = new Date(o.created_at).getHours();
+          hourMap[hr] = (hourMap[hr] || 0) + 1;
+        } catch (_) {}
+      });
+      setHourlyData(
+        Object.entries(hourMap).map(([h, count]) => ({ hour: Number(h), count }))
+      );
 
       // 3. Payment breakdown
       const payMap = {};
@@ -989,27 +1009,34 @@ function HomePage({ t, user }) {
   // Ungrie savings = 20% of revenue
   const ungrieSavings = stats.revenue * 0.2;
 
-  const KpiCard = ({ icon, label, value, sub, green, red, special, pulse }) => {
+  const KpiCard = ({ icon, label, value, sub, green, red, special, pulse, onClick }) => {
     // special = Ungrie card, pulse = pending warning
+    const isPendingAlert = pulse && stats.pending > 0;
     const bg = special
       ? "linear-gradient(135deg, #C4711A 0%, #a85a10 100%)"
-      : pulse && stats.pending > 0
-        ? "#FEF2F2"
+      : isPendingAlert
+        ? "rgba(184,50,50,0.08)"
         : t.surface;
     const borderCol = special
       ? "transparent"
-      : pulse && stats.pending > 0
-        ? "#FECACA"
+      : isPendingAlert
+        ? "rgba(184,50,50,0.30)"
         : t.border;
     return (
       <div
+        onClick={onClick}
+        role={onClick ? "button" : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
         style={{
           background: bg,
           border: `1px solid ${borderCol}`,
           position: "relative",
           overflow: "hidden",
+          cursor: onClick ? "pointer" : "default",
+          outline: "none",
         }}
-        className={`rounded-xl p-5 transition-all hover:shadow-md ${special ? "shadow-lg" : ""}`}
+        className={`rounded-xl p-5 transition-all hover:shadow-md ${special ? "shadow-lg" : ""} ${onClick ? "active:scale-[0.98]" : ""}`}
       >
         {/* Ungrie decorative ring */}
         {special && (
@@ -1031,8 +1058,8 @@ function HomePage({ t, user }) {
             style={{
               background: special
                 ? "rgba(255,255,255,0.18)"
-                : pulse && stats.pending > 0
-                  ? "#FEF2F2"
+                : isPendingAlert
+                  ? "rgba(184,50,50,0.08)"
                   : t.surface2,
               border: `1px solid ${special ? "rgba(255,255,255,0.25)" : borderCol}`,
             }}
@@ -1040,17 +1067,17 @@ function HomePage({ t, user }) {
           >
             {icon}
           </div>
-          {pulse && stats.pending > 0 && !special && (
+          {isPendingAlert && !special && (
             <span
               style={{
-                background: "#FEF2F2",
+                background: "rgba(184,50,50,0.10)",
                 color: "#B83232",
-                border: "1px solid #FECACA",
+                border: "1px solid rgba(184,50,50,0.25)",
                 fontFamily: "'Lato', sans-serif",
               }}
               className="text-xs font-bold px-2 py-0.5 rounded-full animate-pulse"
             >
-              Action needed
+              Action needed ↗
             </span>
           )}
           {sub && !pulse && (
@@ -1077,7 +1104,7 @@ function HomePage({ t, user }) {
           <p
             style={{
               fontFamily: "'Cormorant Garamond', serif",
-              color: special ? "#fff" : t.text,
+              color: special ? "#fff" : isPendingAlert ? "#B83232" : t.text,
             }}
             className="text-3xl font-bold mb-1 leading-none"
           >
@@ -1088,7 +1115,7 @@ function HomePage({ t, user }) {
           style={{
             color: special
               ? "rgba(255,255,255,0.8)"
-              : pulse && stats.pending > 0
+              : isPendingAlert
                 ? "#B83232"
                 : t.subtle,
             fontFamily: "'Lato', sans-serif",
@@ -1294,9 +1321,10 @@ function HomePage({ t, user }) {
           />
           <KpiCard
             icon="⏳"
-            label="Pending Orders"
+            label={stats.pending > 0 ? "Pending Orders — tap to review" : "Pending Orders"}
             value={stats.pending}
             pulse
+            onClick={stats.pending > 0 && setActiveNav ? () => setActiveNav("orders") : undefined}
           />
           {/* Ungrie savings — full-width standout card */}
           <div className="col-span-2 sm:col-span-3">
@@ -1308,6 +1336,211 @@ function HomePage({ t, user }) {
             />
           </div>
         </div>
+      </div>
+
+      {/* ── Order Type Split + Peak Hours ─────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        {/* Order Type Split — donut + numbers */}
+        <Section title="Order Type Breakdown">
+          {loading ? (
+            <div style={{ height: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading…</p>
+            </div>
+          ) : orderTypeSplit.delivery === 0 && orderTypeSplit.pickup === 0 ? (
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, textAlign: "center", padding: "28px 0" }}>
+              No accepted orders in this period.
+            </p>
+          ) : (() => {
+            const total = orderTypeSplit.delivery + orderTypeSplit.pickup || 1;
+            const deliveryPct = Math.round((orderTypeSplit.delivery / total) * 100);
+            const pickupPct   = 100 - deliveryPct;
+            // SVG donut params
+            const R = 44, cx = 60, cy = 60, stroke = 16;
+            const circ = 2 * Math.PI * R;
+            const deliveryDash = (orderTypeSplit.delivery / total) * circ;
+            const pickupDash   = (orderTypeSplit.pickup / total) * circ;
+            const TEAL   = "#14B8A6";
+            const ORANGE = t.accent;
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+                {/* Donut */}
+                <div style={{ position: "relative", flexShrink: 0 }}>
+                  <svg width={120} height={120} viewBox="0 0 120 120">
+                    {/* background ring */}
+                    <circle cx={cx} cy={cy} r={R} fill="none" stroke={t.border2} strokeWidth={stroke} />
+                    {/* delivery arc */}
+                    {orderTypeSplit.delivery > 0 && (
+                      <circle
+                        cx={cx} cy={cy} r={R}
+                        fill="none"
+                        stroke={ORANGE}
+                        strokeWidth={stroke}
+                        strokeDasharray={`${deliveryDash} ${circ}`}
+                        strokeDashoffset={0}
+                        strokeLinecap="butt"
+                        transform={`rotate(-90 ${cx} ${cy})`}
+                        style={{ transition: "stroke-dasharray 0.6s ease" }}
+                      />
+                    )}
+                    {/* pickup arc */}
+                    {orderTypeSplit.pickup > 0 && (
+                      <circle
+                        cx={cx} cy={cy} r={R}
+                        fill="none"
+                        stroke={TEAL}
+                        strokeWidth={stroke}
+                        strokeDasharray={`${pickupDash} ${circ}`}
+                        strokeDashoffset={-(deliveryDash)}
+                        strokeLinecap="butt"
+                        transform={`rotate(-90 ${cx} ${cy})`}
+                        style={{ transition: "stroke-dasharray 0.6s ease" }}
+                      />
+                    )}
+                    {/* centre label */}
+                    <text x={cx} y={cy - 6} textAnchor="middle" fontSize={18} fontWeight={800} fill={t.text} fontFamily="'Cormorant Garamond', serif">
+                      {total}
+                    </text>
+                    <text x={cx} y={cy + 10} textAnchor="middle" fontSize={9} fill={t.muted} fontFamily="'Lato', sans-serif">
+                      orders
+                    </text>
+                  </svg>
+                </div>
+
+                {/* Legend + numbers */}
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  {/* Delivery */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: ORANGE, flexShrink: 0, display: "inline-block" }} />
+                      <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" }}>🚴 Delivery</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ color: t.text, fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 800, lineHeight: 1 }}>
+                        {orderTypeSplit.delivery}
+                      </span>
+                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>
+                        {deliveryPct}%
+                      </span>
+                    </div>
+                    {/* mini progress bar */}
+                    <div style={{ marginTop: 6, height: 5, borderRadius: 99, background: t.border2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${deliveryPct}%`, background: ORANGE, borderRadius: 99, transition: "width 0.6s ease" }} />
+                    </div>
+                  </div>
+                  {/* Pickup */}
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: TEAL, flexShrink: 0, display: "inline-block" }} />
+                      <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" }}>🛍️ Pickup</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ color: t.text, fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 800, lineHeight: 1 }}>
+                        {orderTypeSplit.pickup}
+                      </span>
+                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>
+                        {pickupPct}%
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 6, height: 5, borderRadius: 99, background: t.border2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pickupPct}%`, background: TEAL, borderRadius: 99, transition: "width 0.6s ease" }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </Section>
+
+        {/* Peak Hours — hourly order distribution */}
+        <Section
+          title="Peak Hours"
+          action={
+            <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11 }}>
+              hourly order distribution
+            </span>
+          }
+        >
+          {loading ? (
+            <div style={{ height: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading…</p>
+            </div>
+          ) : hourlyData.every(d => d.count === 0) ? (
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, textAlign: "center", padding: "28px 0" }}>
+              No orders in this period.
+            </p>
+          ) : (() => {
+            const maxCount = Math.max(...hourlyData.map(d => d.count), 1);
+            const peakHour = hourlyData.reduce((best, d) => d.count > best.count ? d : best, { hour: 0, count: 0 });
+            const fmtHour = (h) => {
+              const suffix = h < 12 ? "AM" : "PM";
+              const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
+              return `${display}${suffix}`;
+            };
+            // Show only hours with data or every 3 hrs for label to avoid clutter
+            return (
+              <div>
+                {/* Peak hour callout */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div style={{
+                    background: t.accentBg,
+                    border: `1px solid ${t.accentBorder}`,
+                    borderRadius: 8,
+                    padding: "5px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}>
+                    <span style={{ fontSize: 14 }}>🔥</span>
+                    <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 12 }}>
+                      Peak: {fmtHour(peakHour.hour)}
+                    </span>
+                    <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11 }}>
+                      {peakHour.count} order{peakHour.count !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bar chart */}
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                  <svg viewBox="0 0 504 90" style={{ minWidth: 280, width: "100%", height: "auto" }} preserveAspectRatio="none">
+                    {hourlyData.map((d, i) => {
+                      const barH = Math.max(d.count > 0 ? 3 : 0, (d.count / maxCount) * 62);
+                      const x = i * 21 + 1;
+                      const barY = 68 - barH;
+                      const isPeak = d.hour === peakHour.hour && peakHour.count > 0;
+                      const showLabel = d.hour % 6 === 0; // label at 12AM, 6AM, 12PM, 6PM
+                      const barColor = isPeak ? t.accent : d.count > 0 ? (t.accent + "80") : t.border2;
+                      return (
+                        <g key={d.hour}>
+                          <rect
+                            x={x} y={barY}
+                            width={17} height={barH}
+                            rx={2}
+                            fill={barColor}
+                            style={{ transition: "height 0.4s ease, y 0.4s ease" }}
+                          />
+                          {d.count > 0 && (
+                            <text x={x + 8.5} y={barY - 3} textAnchor="middle" fontSize={6.5} fill={isPeak ? t.accent : t.muted} fontWeight={isPeak ? "800" : "400"} fontFamily="'Lato', sans-serif">
+                              {d.count}
+                            </text>
+                          )}
+                          {showLabel && (
+                            <text x={x + 8.5} y={82} textAnchor="middle" fontSize={7} fill={t.muted} fontFamily="'Lato', sans-serif">
+                              {fmtHour(d.hour)}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    {/* baseline */}
+                    <line x1={0} y1={68.5} x2={504} y2={68.5} stroke={t.border} strokeWidth={0.7} />
+                  </svg>
+                </div>
+              </div>
+            );
+          })()}
+        </Section>
       </div>
 
       {/* Revenue line chart */}
@@ -14786,7 +15019,7 @@ export default function Dashboard({ user, onLogout }) {
   const renderPage = () => {
     switch (activeNav) {
       case "home":
-        return <HomePage t={t} user={user} />;
+        return <HomePage t={t} user={user} setActiveNav={setActiveNav} />;
       case "orders":
         return <OrdersPage t={t} user={user} />;
       case "delivery":
