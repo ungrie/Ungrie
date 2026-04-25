@@ -634,13 +634,17 @@ function LineChart({ data, color, height = 110, t, valuePrefix = "KD " }) {
           pts[hovered] &&
           (() => {
             const p = pts[hovered];
-            const label = `${valuePrefix}${p.v.toFixed(3)}`;
-            const tw = label.length * 5.8 + 10;
+            const dateLine = p.l || "";
+            const valueLine = `${valuePrefix}${p.v.toFixed(3)}`;
+            // Two-line tooltip: date on top, value below
+            const maxLen = Math.max(dateLine.length, valueLine.length);
+            const tw = maxLen * 5.8 + 14;
+            const tipH = dateLine ? 30 : 18;
             const tx = Math.min(
               Math.max(p.x, pad.l + tw / 2),
               W - pad.r - tw / 2,
             );
-            const ty = Math.max(p.y - 10, 14);
+            const ty = Math.max(p.y - 10, tipH + 4);
             return (
               <g>
                 <line
@@ -655,22 +659,49 @@ function LineChart({ data, color, height = 110, t, valuePrefix = "KD " }) {
                 />
                 <rect
                   x={tx - tw / 2}
-                  y={ty - 14}
+                  y={ty - tipH}
                   width={tw}
-                  height={18}
+                  height={tipH}
                   rx={4}
                   fill={color}
                 />
-                <text
-                  x={tx}
-                  y={ty - 2}
-                  textAnchor="middle"
-                  fontSize={8}
-                  fill="#fff"
-                  fontWeight="700"
-                >
-                  {label}
-                </text>
+                {dateLine ? (
+                  <>
+                    <text
+                      x={tx}
+                      y={ty - tipH + 10}
+                      textAnchor="middle"
+                      fontSize={7}
+                      fill="rgba(255,255,255,0.8)"
+                      fontWeight="400"
+                      fontFamily="'Lato', sans-serif"
+                    >
+                      {dateLine}
+                    </text>
+                    <text
+                      x={tx}
+                      y={ty - 4}
+                      textAnchor="middle"
+                      fontSize={8}
+                      fill="#fff"
+                      fontWeight="700"
+                      fontFamily="'Lato', sans-serif"
+                    >
+                      {valueLine}
+                    </text>
+                  </>
+                ) : (
+                  <text
+                    x={tx}
+                    y={ty - 2}
+                    textAnchor="middle"
+                    fontSize={8}
+                    fill="#fff"
+                    fontWeight="700"
+                  >
+                    {valueLine}
+                  </text>
+                )}
               </g>
             );
           })()}
@@ -739,13 +770,116 @@ function RankBars({ items, color, t, emptyMsg = "No data for this period" }) {
   );
 }
 
-// ── Home Page ─────────────────────────────────────────────────────────────────
-function HomePage({ t, user, setActiveNav }) {
-  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+// ── Peak Hours Chart with hover tooltip ──────────────────────────────────────
+function PeakHoursChart({ hourlyData, maxCount, peakHour, fmtHour, t, SVG_W, SVG_H, BAR_W, BAR_AREA_H, LABEL_Y, BASELINE_Y }) {
+  const [hoveredHour, setHoveredHour] = useState(null);
+  if (!hourlyData || hourlyData.length === 0) return null;
 
-  const [period, setPeriod] = useState("Today");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+  return (
+    <div>
+      {/* Peak hour callout */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{
+          background: t.accentBg,
+          border: `1px solid ${t.accentBorder}`,
+          borderRadius: 8,
+          padding: "5px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 14 }}>🔥</span>
+          <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 12 }}>
+            Peak: {fmtHour(peakHour.hour)}
+          </span>
+          <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11 }}>
+            {peakHour.count} order{peakHour.count !== 1 ? "s" : ""}
+          </span>
+        </div>
+      </div>
+
+      {/* Bar chart — taller + hover tooltip */}
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <svg
+          viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+          style={{ minWidth: 340, width: "100%", height: "auto" }}
+          preserveAspectRatio="none"
+          onMouseLeave={() => setHoveredHour(null)}
+        >
+          {hourlyData.map((d, i) => {
+            const barH = Math.max(d.count > 0 ? 4 : 0, (d.count / maxCount) * (BAR_AREA_H - 8));
+            const x = i * 21 + 1;
+            const barY = BASELINE_Y - barH;
+            const isPeak = d.hour === peakHour.hour && peakHour.count > 0;
+            const isHov = hoveredHour === d.hour;
+            const showLabel = d.hour % 6 === 0;
+            const barColor = isPeak ? t.accent : d.count > 0 ? (t.accent + "80") : t.border2;
+
+            // Tooltip position
+            const tipLabel = `${fmtHour(d.hour)}: ${d.count} order${d.count !== 1 ? "s" : ""}`;
+            const tipW = Math.max(tipLabel.length * 5.6 + 14, 70);
+            const tipX = Math.min(Math.max(x + BAR_W / 2, tipW / 2 + 2), SVG_W - tipW / 2 - 2);
+            const tipY = Math.max(barY - 8, 16);
+
+            return (
+              <g
+                key={d.hour}
+                onMouseEnter={() => setHoveredHour(d.hour)}
+                style={{ cursor: "pointer" }}
+              >
+                {/* hover hit area */}
+                <rect
+                  x={x - 2} y={0}
+                  width={BAR_W + 4} height={BASELINE_Y}
+                  fill={isHov ? t.accent + "12" : "transparent"}
+                  rx={2}
+                />
+                {/* bar */}
+                <rect
+                  x={x} y={barY}
+                  width={BAR_W} height={barH}
+                  rx={2}
+                  fill={barColor}
+                  opacity={isHov ? 1 : isPeak ? 1 : 0.78}
+                  style={{ transition: "height 0.4s ease, y 0.4s ease" }}
+                />
+                {/* count label above bar */}
+                {d.count > 0 && !isHov && (
+                  <text x={x + BAR_W / 2} y={barY - 3} textAnchor="middle" fontSize={6.5} fill={isPeak ? t.accent : t.muted} fontWeight={isPeak ? "800" : "400"} fontFamily="'Lato', sans-serif">
+                    {d.count}
+                  </text>
+                )}
+                {/* x-axis label */}
+                {showLabel && (
+                  <text x={x + BAR_W / 2} y={LABEL_Y} textAnchor="middle" fontSize={7.5} fill={isHov ? t.accent : t.muted} fontFamily="'Lato', sans-serif">
+                    {fmtHour(d.hour)}
+                  </text>
+                )}
+                {/* tooltip */}
+                {isHov && (
+                  <g>
+                    <line x1={x + BAR_W / 2} y1={0} x2={x + BAR_W / 2} y2={BASELINE_Y} stroke={t.accent} strokeWidth={0.8} strokeDasharray="3 2" opacity={0.4} />
+                    <rect x={tipX - tipW / 2} y={tipY - 16} width={tipW} height={20} rx={5} fill={t.accent} />
+                    <text x={tipX} y={tipY - 2} textAnchor="middle" fontSize={8.5} fill="#fff" fontWeight="700" fontFamily="'Lato', sans-serif">
+                      {tipLabel}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+          {/* baseline */}
+          <line x1={0} y1={BASELINE_Y + 0.5} x2={SVG_W} y2={BASELINE_Y + 0.5} stroke={t.border} strokeWidth={0.7} />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+// ── Home Page ─────────────────────────────────────────────────────────────────
+function HomePage({ t, user, setActiveNav, period, setPeriod, customStart, setCustomStart, customEnd, setCustomEnd }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+  // period/customStart/customEnd are lifted to parent Dashboard to persist across nav changes
   const [custFilter, setCustFilter] = useState("revenue"); // revenue | orders
   const [loading, setLoading] = useState(true);
   const [zBusy, setZBusy] = useState(false);
@@ -874,7 +1008,12 @@ function HomePage({ t, user, setActiveNav }) {
       setTimeSeries(
         Object.entries(dayMap)
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([d, val]) => ({ l: d.slice(5), v: val.v, orders: val.orders })),
+          .map(([d, val]) => {
+            // d is "YYYY-MM-DD" — format label as DD-MM
+            const parts = d.split("-"); // ["YYYY","MM","DD"]
+            const label = parts.length === 3 ? `${parts[2]}-${parts[1]}` : d.slice(5);
+            return { l: label, v: val.v, orders: val.orders };
+          }),
       );
 
       // 5. Top selling items
@@ -1338,7 +1477,7 @@ function HomePage({ t, user, setActiveNav }) {
         </div>
       </div>
 
-      {/* ── Order Type Split + Peak Hours ─────────────────────────────────── */}
+      {/* ── Order Type Breakdown + Payment Methods — side by side ──────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
         {/* Order Type Split — donut + numbers */}
@@ -1355,7 +1494,6 @@ function HomePage({ t, user, setActiveNav }) {
             const total = orderTypeSplit.delivery + orderTypeSplit.pickup || 1;
             const deliveryPct = Math.round((orderTypeSplit.delivery / total) * 100);
             const pickupPct   = 100 - deliveryPct;
-            // SVG donut params
             const R = 44, cx = 60, cy = 60, stroke = 16;
             const circ = 2 * Math.PI * R;
             const deliveryDash = (orderTypeSplit.delivery / total) * circ;
@@ -1364,83 +1502,45 @@ function HomePage({ t, user, setActiveNav }) {
             const ORANGE = t.accent;
             return (
               <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
-                {/* Donut */}
                 <div style={{ position: "relative", flexShrink: 0 }}>
                   <svg width={120} height={120} viewBox="0 0 120 120">
-                    {/* background ring */}
                     <circle cx={cx} cy={cy} r={R} fill="none" stroke={t.border2} strokeWidth={stroke} />
-                    {/* delivery arc */}
                     {orderTypeSplit.delivery > 0 && (
-                      <circle
-                        cx={cx} cy={cy} r={R}
-                        fill="none"
-                        stroke={ORANGE}
-                        strokeWidth={stroke}
-                        strokeDasharray={`${deliveryDash} ${circ}`}
-                        strokeDashoffset={0}
-                        strokeLinecap="butt"
-                        transform={`rotate(-90 ${cx} ${cy})`}
-                        style={{ transition: "stroke-dasharray 0.6s ease" }}
-                      />
+                      <circle cx={cx} cy={cy} r={R} fill="none" stroke={ORANGE} strokeWidth={stroke}
+                        strokeDasharray={`${deliveryDash} ${circ}`} strokeDashoffset={0} strokeLinecap="butt"
+                        transform={`rotate(-90 ${cx} ${cy})`} style={{ transition: "stroke-dasharray 0.6s ease" }} />
                     )}
-                    {/* pickup arc */}
                     {orderTypeSplit.pickup > 0 && (
-                      <circle
-                        cx={cx} cy={cy} r={R}
-                        fill="none"
-                        stroke={TEAL}
-                        strokeWidth={stroke}
-                        strokeDasharray={`${pickupDash} ${circ}`}
-                        strokeDashoffset={-(deliveryDash)}
-                        strokeLinecap="butt"
-                        transform={`rotate(-90 ${cx} ${cy})`}
-                        style={{ transition: "stroke-dasharray 0.6s ease" }}
-                      />
+                      <circle cx={cx} cy={cy} r={R} fill="none" stroke={TEAL} strokeWidth={stroke}
+                        strokeDasharray={`${pickupDash} ${circ}`} strokeDashoffset={-(deliveryDash)} strokeLinecap="butt"
+                        transform={`rotate(-90 ${cx} ${cy})`} style={{ transition: "stroke-dasharray 0.6s ease" }} />
                     )}
-                    {/* centre label */}
-                    <text x={cx} y={cy - 6} textAnchor="middle" fontSize={18} fontWeight={800} fill={t.text} fontFamily="'Cormorant Garamond', serif">
-                      {total}
-                    </text>
-                    <text x={cx} y={cy + 10} textAnchor="middle" fontSize={9} fill={t.muted} fontFamily="'Lato', sans-serif">
-                      orders
-                    </text>
+                    <text x={cx} y={cy - 6} textAnchor="middle" fontSize={18} fontWeight={800} fill={t.text} fontFamily="'Cormorant Garamond', serif">{total}</text>
+                    <text x={cx} y={cy + 10} textAnchor="middle" fontSize={9} fill={t.muted} fontFamily="'Lato', sans-serif">orders</text>
                   </svg>
                 </div>
-
-                {/* Legend + numbers */}
                 <div style={{ flex: 1, minWidth: 120 }}>
-                  {/* Delivery */}
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <span style={{ width: 10, height: 10, borderRadius: "50%", background: ORANGE, flexShrink: 0, display: "inline-block" }} />
                       <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" }}>🚴 Delivery</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                      <span style={{ color: t.text, fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 800, lineHeight: 1 }}>
-                        {orderTypeSplit.delivery}
-                      </span>
-                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>
-                        {deliveryPct}%
-                      </span>
+                      <span style={{ color: t.text, fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 800, lineHeight: 1 }}>{orderTypeSplit.delivery}</span>
+                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>{deliveryPct}%</span>
                     </div>
-                    {/* mini progress bar */}
                     <div style={{ marginTop: 6, height: 5, borderRadius: 99, background: t.border2, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${deliveryPct}%`, background: ORANGE, borderRadius: 99, transition: "width 0.6s ease" }} />
                     </div>
                   </div>
-                  {/* Pickup */}
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <span style={{ width: 10, height: 10, borderRadius: "50%", background: TEAL, flexShrink: 0, display: "inline-block" }} />
                       <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" }}>🛍️ Pickup</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                      <span style={{ color: t.text, fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 800, lineHeight: 1 }}>
-                        {orderTypeSplit.pickup}
-                      </span>
-                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>
-                        {pickupPct}%
-                      </span>
+                      <span style={{ color: t.text, fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 800, lineHeight: 1 }}>{orderTypeSplit.pickup}</span>
+                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>{pickupPct}%</span>
                     </div>
                     <div style={{ marginTop: 6, height: 5, borderRadius: 99, background: t.border2, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${pickupPct}%`, background: TEAL, borderRadius: 99, transition: "width 0.6s ease" }} />
@@ -1452,96 +1552,100 @@ function HomePage({ t, user, setActiveNav }) {
           })()}
         </Section>
 
-        {/* Peak Hours — hourly order distribution */}
-        <Section
-          title="Peak Hours"
-          action={
-            <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11 }}>
-              hourly order distribution
-            </span>
-          }
-        >
+        {/* Payment Methods — paired with Order Type Breakdown */}
+        <Section title="Payment Methods">
           {loading ? (
             <div style={{ height: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading…</p>
             </div>
-          ) : hourlyData.every(d => d.count === 0) ? (
-            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, textAlign: "center", padding: "28px 0" }}>
-              No orders in this period.
-            </p>
-          ) : (() => {
-            const maxCount = Math.max(...hourlyData.map(d => d.count), 1);
-            const peakHour = hourlyData.reduce((best, d) => d.count > best.count ? d : best, { hour: 0, count: 0 });
-            const fmtHour = (h) => {
-              const suffix = h < 12 ? "AM" : "PM";
-              const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
-              return `${display}${suffix}`;
-            };
-            // Show only hours with data or every 3 hrs for label to avoid clutter
-            return (
-              <div>
-                {/* Peak hour callout */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                  <div style={{
-                    background: t.accentBg,
-                    border: `1px solid ${t.accentBorder}`,
-                    borderRadius: 8,
-                    padding: "5px 12px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}>
-                    <span style={{ fontSize: 14 }}>🔥</span>
-                    <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 12 }}>
-                      Peak: {fmtHour(peakHour.hour)}
-                    </span>
-                    <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11 }}>
-                      {peakHour.count} order{peakHour.count !== 1 ? "s" : ""}
-                    </span>
+          ) : payBreakdown.length === 0 ? (
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, textAlign: "center", padding: "28px 0" }}>No payment data for this period.</p>
+          ) : (
+            <div className="flex items-start gap-6 flex-wrap">
+              <svg width={120} height={120} viewBox="0 0 140 140" className="flex-shrink-0">
+                {(() => {
+                  const total = payBreakdown.reduce((s, p) => s + p.count, 0) || 1;
+                  let angle = -90;
+                  const cx = 70, cy = 70, r = 52, thick = 20;
+                  const arcPath = (sd, ed) => {
+                    const s = (sd * Math.PI) / 180, e = (ed * Math.PI) / 180;
+                    return `M${cx + r * Math.cos(s)},${cy + r * Math.sin(s)} A${r},${r} 0 ${ed - sd > 180 ? 1 : 0},1 ${cx + r * Math.cos(e)},${cy + r * Math.sin(e)}`;
+                  };
+                  return payBreakdown.map((p, i) => {
+                    const pct = p.count / total;
+                    const st = angle;
+                    angle += pct * 360;
+                    return pct > 0 ? (
+                      <path key={i} d={arcPath(st, angle)} fill="none" stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={thick} strokeLinecap="butt" />
+                    ) : null;
+                  });
+                })()}
+                <text x="70" y="67" textAnchor="middle" fontSize={18} fontWeight={800} fill={t.text}>{payBreakdown.reduce((s, p) => s + p.count, 0)}</text>
+                <text x="70" y="81" textAnchor="middle" fontSize={9} fill={t.muted}>orders</text>
+              </svg>
+              <div className="space-y-2.5 flex-1">
+                {payBreakdown.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} className="w-2.5 h-2.5 rounded-full flex-shrink-0" />
+                      <p style={{ color: t.text, fontFamily: "'Lato', sans-serif" }} className="text-sm">{p.method}</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif" }} className="text-xs">{p.count} orders</span>
+                      <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif" }} className="text-sm font-bold">{fmtKDh(p.total)}</span>
+                    </div>
                   </div>
-                </div>
-
-                {/* Bar chart */}
-                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                  <svg viewBox="0 0 504 90" style={{ minWidth: 280, width: "100%", height: "auto" }} preserveAspectRatio="none">
-                    {hourlyData.map((d, i) => {
-                      const barH = Math.max(d.count > 0 ? 3 : 0, (d.count / maxCount) * 62);
-                      const x = i * 21 + 1;
-                      const barY = 68 - barH;
-                      const isPeak = d.hour === peakHour.hour && peakHour.count > 0;
-                      const showLabel = d.hour % 6 === 0; // label at 12AM, 6AM, 12PM, 6PM
-                      const barColor = isPeak ? t.accent : d.count > 0 ? (t.accent + "80") : t.border2;
-                      return (
-                        <g key={d.hour}>
-                          <rect
-                            x={x} y={barY}
-                            width={17} height={barH}
-                            rx={2}
-                            fill={barColor}
-                            style={{ transition: "height 0.4s ease, y 0.4s ease" }}
-                          />
-                          {d.count > 0 && (
-                            <text x={x + 8.5} y={barY - 3} textAnchor="middle" fontSize={6.5} fill={isPeak ? t.accent : t.muted} fontWeight={isPeak ? "800" : "400"} fontFamily="'Lato', sans-serif">
-                              {d.count}
-                            </text>
-                          )}
-                          {showLabel && (
-                            <text x={x + 8.5} y={82} textAnchor="middle" fontSize={7} fill={t.muted} fontFamily="'Lato', sans-serif">
-                              {fmtHour(d.hour)}
-                            </text>
-                          )}
-                        </g>
-                      );
-                    })}
-                    {/* baseline */}
-                    <line x1={0} y1={68.5} x2={504} y2={68.5} stroke={t.border} strokeWidth={0.7} />
-                  </svg>
-                </div>
+                ))}
               </div>
-            );
-          })()}
+            </div>
+          )}
         </Section>
       </div>
+
+      {/* ── Peak Hours — full width ───────────────────────────────────────────── */}
+      <Section
+        title="Peak Hours"
+        action={
+          <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11 }}>
+            hourly order distribution
+          </span>
+        }
+      >
+        {loading ? (
+          <div style={{ height: 180, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading…</p>
+          </div>
+        ) : hourlyData.every(d => d.count === 0) ? (
+          <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13, textAlign: "center", padding: "28px 0" }}>
+            No orders in this period.
+          </p>
+        ) : (() => {
+          const maxCount = Math.max(...hourlyData.map(d => d.count), 1);
+          const peakHour = hourlyData.reduce((best, d) => d.count > best.count ? d : best, { hour: 0, count: 0 });
+          const fmtHour = (h) => {
+            const suffix = h < 12 ? "AM" : "PM";
+            const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
+            return `${display}${suffix}`;
+          };
+          const SVG_W = 504, SVG_H = 160;
+          const BAR_W = 17, BAR_AREA_H = 120, LABEL_Y = SVG_H - 8, BASELINE_Y = BAR_AREA_H + 10;
+          return (
+            <PeakHoursChart
+              hourlyData={hourlyData}
+              maxCount={maxCount}
+              peakHour={peakHour}
+              fmtHour={fmtHour}
+              t={t}
+              SVG_W={SVG_W}
+              SVG_H={SVG_H}
+              BAR_W={BAR_W}
+              BAR_AREA_H={BAR_AREA_H}
+              LABEL_Y={LABEL_Y}
+              BASELINE_Y={BASELINE_Y}
+            />
+          );
+        })()}
+      </Section>
 
       {/* Revenue line chart */}
       <Section
@@ -1569,7 +1673,7 @@ function HomePage({ t, user, setActiveNav }) {
             <p style={{ color: t.muted }}>Loading…</p>
           </div>
         ) : (
-          <LineChart data={timeSeries} color={t.accent} height={110} t={t} />
+          <LineChart data={timeSeries} color={t.accent} height={160} t={t} />
         )}
       </Section>
 
@@ -1651,115 +1755,6 @@ function HomePage({ t, user, setActiveNav }) {
           )}
         </Section>
       </div>
-
-      {/* Payment breakdown */}
-      {payBreakdown.length > 0 && !loading && (
-        <Section title="Payment Methods">
-          <div className="flex items-start gap-6 flex-wrap">
-            <svg
-              width={140}
-              height={140}
-              viewBox="0 0 140 140"
-              className="flex-shrink-0"
-            >
-              {(() => {
-                const total =
-                  payBreakdown.reduce((s, p) => s + p.count, 0) || 1;
-                let angle = -90;
-                const cx = 70,
-                  cy = 70,
-                  r = 52,
-                  thick = 20;
-                const arcPath = (sd, ed) => {
-                  const s = (sd * Math.PI) / 180,
-                    e = (ed * Math.PI) / 180;
-                  return `M${cx + r * Math.cos(s)},${cy + r * Math.sin(s)} A${r},${r} 0 ${ed - sd > 180 ? 1 : 0},1 ${cx + r * Math.cos(e)},${cy + r * Math.sin(e)}`;
-                };
-                return payBreakdown.map((p, i) => {
-                  const pct = p.count / total;
-                  const st = angle;
-                  angle += pct * 360;
-                  return pct > 0 ? (
-                    <path
-                      key={i}
-                      d={arcPath(st, angle)}
-                      fill="none"
-                      stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                      strokeWidth={thick}
-                      strokeLinecap="butt"
-                    />
-                  ) : null;
-                });
-              })()}
-              <text
-                x="70"
-                y="67"
-                textAnchor="middle"
-                fontSize={18}
-                fontWeight={800}
-                fill={t.text}
-              >
-                {payBreakdown.reduce((s, p) => s + p.count, 0)}
-              </text>
-              <text
-                x="70"
-                y="81"
-                textAnchor="middle"
-                fontSize={9}
-                fill={t.muted}
-              >
-                orders
-              </text>
-            </svg>
-            <div className="space-y-2.5 flex-1">
-              {payBreakdown.map((p, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      style={{
-                        background: CHART_COLORS[i % CHART_COLORS.length],
-                      }}
-                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    />
-                    <p
-                      style={{
-                        color: t.text,
-                        fontFamily: "'Lato', sans-serif",
-                      }}
-                      className="text-sm"
-                    >
-                      {p.method}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span
-                      style={{
-                        color: t.muted,
-                        fontFamily: "'Lato', sans-serif",
-                      }}
-                      className="text-xs"
-                    >
-                      {p.count} orders
-                    </span>
-                    <span
-                      style={{
-                        color: t.accent,
-                        fontFamily: "'Lato', sans-serif",
-                      }}
-                      className="text-sm font-bold"
-                    >
-                      {fmtKDh(p.total)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Section>
-      )}
 
       {/* Orders per day bar chart */}
       <Section
@@ -14931,6 +14926,11 @@ export default function Dashboard({ user, onLogout }) {
   const [liveNewCount, setLiveNewCount] = useState(0);
   const [liveAcceptedCount, setLiveAcceptedCount] = useState(0);
 
+  // ── Persist home period filter across nav changes ──────────────────────────
+  const [homePeriod, setHomePeriod] = useState("Today");
+  const [homeCustomStart, setHomeCustomStart] = useState("");
+  const [homeCustomEnd, setHomeCustomEnd] = useState("");
+
   const t = darkMode ? DARK : LIGHT;
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
 
@@ -15019,7 +15019,19 @@ export default function Dashboard({ user, onLogout }) {
   const renderPage = () => {
     switch (activeNav) {
       case "home":
-        return <HomePage t={t} user={user} setActiveNav={setActiveNav} />;
+        return (
+          <HomePage
+            t={t}
+            user={user}
+            setActiveNav={setActiveNav}
+            period={homePeriod}
+            setPeriod={setHomePeriod}
+            customStart={homeCustomStart}
+            setCustomStart={setHomeCustomStart}
+            customEnd={homeCustomEnd}
+            setCustomEnd={setHomeCustomEnd}
+          />
+        );
       case "orders":
         return <OrdersPage t={t} user={user} />;
       case "delivery":
