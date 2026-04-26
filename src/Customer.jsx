@@ -716,7 +716,26 @@ a{text-decoration:none}
   .rest-map-inner{ height:240px; }
 }
 
-/* ── order history ── */
+/* ── service availability chips ── */
+.svc-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11.5px;font-weight:700;letter-spacing:.01em;
+  padding:4px 11px;border-radius:var(--r-pill);flex-shrink:0;
+  border:1.5px solid transparent;
+}
+.svc-chip.on{
+  color:#166534;background:#dcfce7;border-color:#bbf7d0;
+}
+.svc-chip.off{
+  color:#9f1239;background:#fff1f2;border-color:#fecdd3;
+  text-decoration:line-through;opacity:.7;
+}
+.svc-divider{
+  width:1px;height:16px;background:var(--border-strong);
+  flex-shrink:0;margin:0 2px;
+}
+
+/* ── order closed banner ── */
 .order-card{border:1.5px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:border-color .15s,background .15s}
 .order-card:hover{border-color:#bbb}
 .order-card.active{border-color:var(--orange);background:#fff9f6}
@@ -899,7 +918,7 @@ function HeroSlideshow({ restaurant }) {
 }
 
 /* ── RestaurantInfoStrip ──────────────────────────────────────────────────── */
-function RestaurantInfoStrip({ restaurant }) {
+function RestaurantInfoStrip({ restaurant, acceptDelivery, acceptPickup }) {
   const [mapOpen, setMapOpen] = useState(false);
   const mapRef = useRef(null);
   const leafletMapRef = useRef(null);
@@ -983,7 +1002,14 @@ function RestaurantInfoStrip({ restaurant }) {
   }, [mapOpen]); // eslint-disable-line
 
   const hasInfo = restaurant?.address || restaurant?.ph_no;
-  if (!hasInfo && !hasLocation) return null;
+  const showStrip = hasInfo || hasLocation || acceptDelivery !== undefined || acceptPickup !== undefined;
+  if (!showStrip) return null;
+
+  // Determine what to show for service chips
+  // Only show chips if restaurant data is loaded (avoid flicker on initial load)
+  const showServiceChips = restaurant != null;
+  const delivOn = acceptDelivery ?? true;
+  const pickOn  = acceptPickup  ?? true;
 
   return (
     <>
@@ -1033,6 +1059,30 @@ function RestaurantInfoStrip({ restaurant }) {
               </svg>
               <a href={`tel:${restaurant.ph_no}`}>{restaurant.ph_no}</a>
             </span>
+          )}
+
+          {/* Service availability chips — Delivery / Pickup */}
+          {showServiceChips && (
+            <>
+              {(hasInfo) && <div className="svc-divider" />}
+              {/* Delivery chip */}
+              <span className={`svc-chip ${delivOn ? "on" : "off"}`} title={delivOn ? "Delivery available" : "Delivery not available"}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
+                  <circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+                </svg>
+                Delivery
+              </span>
+              {/* Pickup chip */}
+              <span className={`svc-chip ${pickOn ? "on" : "off"}`} title={pickOn ? "Pickup available" : "Pickup not available"}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <path d="M16 10a4 4 0 0 1-8 0"/>
+                </svg>
+                Pickup
+              </span>
+            </>
           )}
 
           {/* Map toggle — only if we have coordinates */}
@@ -5755,7 +5805,11 @@ export default function Customer() {
           <HeroSlideshow restaurant={restaurant} />
 
           {/* RESTAURANT INFO STRIP */}
-          <RestaurantInfoStrip restaurant={restaurant} />
+          <RestaurantInfoStrip
+            restaurant={restaurant}
+            acceptDelivery={acceptDelivery}
+            acceptPickup={acceptPickup}
+          />
 
           {/* NOT ACCEPTING ORDERS BANNER */}
           {restaurant &&
