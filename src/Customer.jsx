@@ -2643,21 +2643,24 @@ function CheckoutSheet({
   acceptPickup,
   orderType,
   onOrderTypeChange,
-  deliveryFeeInfo,
+  deliveryZones,      // Delivery_Zones rows — used to compute fee for whichever address is selected
+  initialAddrId,      // which address to pre-select (activeAddrId from parent)
+  onAddrChange,       // notify parent when user switches address
 }) {
-  const [selAddr, setSelAddr] = useState(defaultAddr?.id || null);
+  // Initialise to the address that was active when checkout opened
+  const [selAddr, setSelAddr] = useState(
+    initialAddrId ?? defaultAddr?.id ?? null,
+  );
   const [pay, setPay] = useState("Cash");
   const [placing, setPlacing] = useState(false);
   const [typeErr, setTypeErr] = useState("");
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
+    return () => { document.body.style.overflow = ""; };
   }, []);
 
-  // If the current type becomes unavailable (restaurant toggled it off while sheet is open), auto-switch
+  // Auto-switch order type if restaurant toggles while sheet is open
   useEffect(() => {
     if (orderType === "delivery" && !acceptDelivery && acceptPickup) {
       onOrderTypeChange("pickup");
@@ -2666,18 +2669,47 @@ function CheckoutSheet({
     }
   }, [acceptDelivery, acceptPickup, orderType, onOrderTypeChange]);
 
-  const addr = addresses.find((a) => a.id === selAddr);
+  const addr    = addresses.find((a) => a.id === selAddr) ?? null;
   const isPickup = orderType === "pickup";
-  const bothOff = !acceptDelivery && !acceptPickup;
+  const bothOff  = !acceptDelivery && !acceptPickup;
 
-  // Recompute the checkout total using the zone-resolved delivery fee
-  const zoneFee = isPickup ? 0 : (deliveryFeeInfo?.outOfRange ? 0 : (deliveryFeeInfo?.fee ?? 0));
-  // total prop already includes fee from CartSheet preview — recompute from subTotal for accuracy
-  const zoneTotal = subTotal != null
+  // ── Resolve zone + fee for the CURRENTLY SELECTED address ─────────────────
+  // This is a plain derived value — no useEffect needed. Recomputes every render
+  // when selAddr, orderType, restaurant or deliveryZones change.
+  const localFeeInfo = (() => {
+    if (isPickup) return null;
+    if (!restaurant) return null;
+    if (restaurant.use_fixed_fee) {
+      return {
+        fee: Number(restaurant.fixed_delivery_fee ?? 0),
+        zone: null,
+        outOfRange: false,
+        isFixed: true,
+      };
+    }
+    if (!addr) return null; // no address chosen yet
+    return resolveDeliveryZone(
+      addr.latitude,
+      addr.longitude,
+      restaurant.latitude,
+      restaurant.longitude,
+      deliveryZones ?? [],
+    );
+  })();
+
+  const zoneFee      = isPickup ? 0 : (localFeeInfo?.outOfRange ? 0 : (localFeeInfo?.fee ?? 0));
+  const zoneTotal    = subTotal != null
     ? Math.max(0, subTotal - (discountAmt ?? 0) + zoneFee)
     : total;
-  const outOfRange = !isPickup && !!deliveryFeeInfo?.outOfRange;
-  const missingCoords = !isPickup && !!deliveryFeeInfo?.missingCoords;
+  const outOfRange    = !isPickup && !!localFeeInfo?.outOfRange;
+  const missingCoords = !isPickup && !!localFeeInfo?.missingCoords;
+
+  // Notify parent so nav-bar address chip and CartSheet stay in sync
+  const handleSelAddr = (id) => {
+    setSelAddr(id);
+    setTypeErr("");
+    if (onAddrChange) onAddrChange(id);
+  };
 
   return (
     <>
@@ -2791,56 +2823,84 @@ function CheckoutSheet({
                 </button>
               ) : (
                 <>
-                  {addresses.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`addr-card${selAddr === a.id ? " sel" : ""}`}
-                      onClick={() => setSelAddr(a.id)}
-                    >
+                  {addresses.map((a) => {
+                    // Pre-compute zone info for every card so customer can see
+                    // at a glance which addresses are in range before selecting.
+                    const cardInfo = (() => {
+                      if (restaurant?.use_fixed_fee) {
+                        return { fee: Number(restaurant.fixed_delivery_fee ?? 0), outOfRange: false, isFixed: true };
+                      }
+                      return resolveDeliveryZone(
+                        a.latitude, a.longitude,
+                        restaurant?.latitude, restaurant?.longitude,
+                        deliveryZones ?? [],
+                      );
+                    })();
+                    const cardOut   = !!cardInfo?.outOfRange;
+                    const isSelected = selAddr === a.id;
+                    return (
                       <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 4,
-                        }}
+                        key={a.id}
+                        className={`addr-card${isSelected ? " sel" : ""}`}
+                        style={cardOut ? { opacity: 0.65, borderColor: "#fca5a5" } : {}}
+                        onClick={() => handleSelAddr(a.id)}
                       >
-                        <span style={{ color: "var(--t2)" }}>
-                          {a.label === "Work" ? Ic.work : Ic.homeaddr}
-                        </span>
-                        <span style={{ fontWeight: 700, fontSize: 14 }}>
-                          {a.label}
-                        </span>
-                        {selAddr === a.id && (
-                          <span
-                            style={{
-                              marginLeft: "auto",
-                              color: "var(--orange)",
-                            }}
-                          >
-                            {Ic.check}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                          <span style={{ color: "var(--t2)" }}>
+                            {a.label === "Work" ? Ic.work : Ic.homeaddr}
                           </span>
-                        )}
+                          <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
+
+                          {/* Inline zone / fee pill */}
+                          {!cardOut && cardInfo?.zone && (
+                            <span style={{
+                              fontSize: 10, fontWeight: 700,
+                              background: "#f0fdf4", color: "#15803d",
+                              border: "1px solid #86efac",
+                              borderRadius: 99, padding: "1px 7px", marginLeft: 2,
+                            }}>
+                              {cardInfo.zone.name} · {fmt(cardInfo.fee)}
+                            </span>
+                          )}
+                          {!cardOut && cardInfo?.isFixed && (
+                            <span style={{
+                              fontSize: 10, fontWeight: 700,
+                              background: "#f0f9ff", color: "#0369a1",
+                              border: "1px solid #bae6fd",
+                              borderRadius: 99, padding: "1px 7px", marginLeft: 2,
+                            }}>
+                              {fmt(cardInfo.fee)} delivery
+                            </span>
+                          )}
+                          {cardOut && (
+                            <span style={{
+                              fontSize: 10, fontWeight: 700,
+                              background: "#fdecea", color: "var(--red)",
+                              border: "1px solid #fca5a5",
+                              borderRadius: 99, padding: "1px 7px", marginLeft: 2,
+                            }}>
+                              🚫 Out of range
+                            </span>
+                          )}
+
+                          {isSelected && (
+                            <span style={{ marginLeft: "auto", color: "var(--orange)" }}>
+                              {Ic.check}
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ fontSize: 13, color: "var(--t2)", paddingLeft: 22 }}>
+                          {[
+                            a.apartment_no && `Apt ${a.apartment_no}`,
+                            a.floor && `Floor ${a.floor}`,
+                            a.bldg_name,
+                            a.street,
+                            a.block,
+                          ].filter(Boolean).join(", ")}
+                        </p>
                       </div>
-                      <p
-                        style={{
-                          fontSize: 13,
-                          color: "var(--t2)",
-                          paddingLeft: 22,
-                        }}
-                      >
-                        {[
-                          a.apartment_no && `Apt ${a.apartment_no}`,
-                          a.floor && `Floor ${a.floor}`,
-                          a.bldg_name,
-                          a.street,
-                          a.block,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <button
                     className="btn-out"
                     style={{
@@ -2959,69 +3019,39 @@ function CheckoutSheet({
                   <span>{fmt(subTotal)}</span>
                 </div>
               )}
-              {/* Delivery fee row — delivery only */}
+              {/* Delivery fee row — live-updates as address changes */}
               {!isPickup && (
                 <>
-                  {outOfRange ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 13,
-                        color: "var(--red)",
-                        fontWeight: 600,
-                        marginBottom: 6,
-                      }}
-                    >
+                  {!addr ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t3)", marginBottom: 6 }}>
+                      <span>Delivery fee</span>
+                      <span>Select address</span>
+                    </div>
+                  ) : outOfRange ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--red)", fontWeight: 600, marginBottom: 6 }}>
                       <span>🚫 Delivery fee</span>
                       <span>Out of range</span>
                     </div>
-                  ) : deliveryFeeInfo?.isFixed ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 13,
-                        color: "var(--t2)",
-                        marginBottom: 6,
-                      }}
-                    >
+                  ) : localFeeInfo?.isFixed ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t2)", marginBottom: 6 }}>
                       <span>Delivery fee</span>
-                      <span>{fmt(deliveryFeeInfo.fee)}</span>
+                      <span>{fmt(localFeeInfo.fee)}</span>
                     </div>
-                  ) : deliveryFeeInfo?.zone ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 13,
-                        color: "var(--t2)",
-                        marginBottom: 6,
-                      }}
-                    >
+                  ) : localFeeInfo?.zone ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t2)", marginBottom: 6 }}>
                       <span>
                         Delivery fee
                         <span style={{ fontSize: 11, marginLeft: 5, color: "var(--t3)" }}>
-                          ({deliveryFeeInfo.zone.name}
-                          {deliveryFeeInfo.distKm != null
-                            ? ` · ${deliveryFeeInfo.distKm.toFixed(1)} km`
-                            : ""})
+                          ({localFeeInfo.zone.name}
+                          {localFeeInfo.distKm != null ? ` · ${localFeeInfo.distKm.toFixed(1)} km` : ""})
                         </span>
                       </span>
-                      <span>{fmt(deliveryFeeInfo.fee)}</span>
+                      <span>{fmt(localFeeInfo.fee)}</span>
                     </div>
                   ) : (
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 13,
-                        color: "var(--t2)",
-                        marginBottom: 6,
-                      }}
-                    >
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--t3)", marginBottom: 6 }}>
                       <span>Delivery fee</span>
-                      <span>{fmt(0.5)}</span>
+                      <span>—</span>
                     </div>
                   )}
                 </>
@@ -3102,14 +3132,14 @@ function CheckoutSheet({
           {!bothOff && (
             <button
               className="btn-primary"
-              disabled={placing || (!isPickup && !selAddr) || outOfRange}
+              disabled={placing || (!isPickup && (!selAddr || outOfRange))}
               onClick={async () => {
                 if (!isPickup && !addr) {
                   setTypeErr("Please select a delivery address.");
                   return;
                 }
                 if (outOfRange) {
-                  setTypeErr("Delivery is not available to your selected address.");
+                  setTypeErr("Delivery is not available to your selected address. Please choose another.");
                   return;
                 }
                 setTypeErr("");
@@ -3119,6 +3149,7 @@ function CheckoutSheet({
                   payMethod: pay,
                   notes: cartNote || "",
                   orderType,
+                  resolvedFeeInfo: localFeeInfo,
                 });
                 setPlacing(false);
               }}
@@ -3689,6 +3720,8 @@ function ProfileSheet({
   onDeleteAddress,
   onSetDefault,
   defaultAddrId,
+  activeAddrId,
+  onActiveAddrChange,
   onLoadOrders,
   onLogout,
 }) {
@@ -4114,17 +4147,19 @@ function ProfileSheet({
                   </p>
                 </div>
               ) : (
-                addresses.map((a) => (
+                addresses.map((a) => {
+                  const isDefault  = a.id === defaultAddrId;
+                  const isActive   = a.id === activeAddrId;
+                  return (
                   <div
                     key={a.id}
                     className="addr-card"
                     style={{
-                      borderColor:
-                        a.id === defaultAddrId
-                          ? "var(--orange)"
-                          : "var(--border)",
-                      background: a.id === defaultAddrId ? "#fff9f6" : "#fff",
+                      borderColor: (isActive || isDefault) ? "var(--orange)" : "var(--border)",
+                      background:  (isActive || isDefault) ? "#fff9f6"       : "#fff",
+                      cursor: "pointer",
                     }}
+                    onClick={() => { if (onActiveAddrChange) onActiveAddrChange(a.id); }}
                   >
                     {/* Map snapshot thumbnail */}
                     {a.map_snapshot_url ? (
@@ -4143,99 +4178,74 @@ function ProfileSheet({
                         style={{ pointerEvents: "none" }}
                       />
                     ) : null}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        marginBottom: 4,
-                      }}
-                    >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <span style={{ fontSize: 16 }}>
-                        {a.label === "Home"
-                          ? "🏠"
-                          : a.label === "Work"
-                            ? "🏢"
-                            : a.label === "Gym"
-                              ? "🏋️"
-                              : "📍"}
+                        {a.label === "Home" ? "🏠" : a.label === "Work" ? "🏢" : a.label === "Gym" ? "🏋️" : "📍"}
                       </span>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>
-                        {a.label}
-                      </span>
-                      {a.id === defaultAddrId && (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            background: "#fff0e8",
-                            color: "var(--orange)",
-                            padding: "2px 8px",
-                            borderRadius: 99,
-                            marginLeft: 4,
-                          }}
-                        >
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
+                      {isDefault && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700,
+                          background: "#fff0e8", color: "var(--orange)",
+                          padding: "2px 8px", borderRadius: 99, marginLeft: 4,
+                        }}>
                           Default
                         </span>
                       )}
+                      {/* "Selected" pill — shown when active but not the default */}
+                      {isActive && !isDefault && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700,
+                          background: "#fef9c3", color: "#854d0e",
+                          padding: "2px 8px", borderRadius: 99, marginLeft: 4,
+                        }}>
+                          ✓ Selected
+                        </span>
+                      )}
+                      {/* Checkmark for the active card */}
+                      {isActive && (
+                        <span style={{ marginLeft: "auto", color: "var(--orange)" }}>
+                          {Ic.check}
+                        </span>
+                      )}
                     </div>
-                    <p
-                      style={{
-                        fontSize: 13,
-                        color: "var(--t2)",
-                        marginBottom: 10,
-                        paddingLeft: 24,
-                      }}
-                    >
+                    <p style={{ fontSize: 13, color: "var(--t2)", marginBottom: 10, paddingLeft: 24 }}>
                       {[
                         a.apartment_no && `Apt ${a.apartment_no}`,
                         a.floor && `Floor ${a.floor}`,
                         a.bldg_name,
                         a.street,
                         a.block,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
+                      ].filter(Boolean).join(", ")}
                     </p>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        paddingLeft: 24,
-                        flexWrap: "wrap",
-                      }}
-                    >
+                    <div style={{ display: "flex", gap: 8, paddingLeft: 24, flexWrap: "wrap" }}>
                       <button
                         className="btn-out"
                         style={{ fontSize: 12, padding: "5px 11px" }}
-                        onClick={() => openEditAddr(a)}
+                        onClick={(e) => { e.stopPropagation(); openEditAddr(a); }}
                       >
                         {Ic.edit} Edit
                       </button>
-                      {a.id !== defaultAddrId && (
+                      {!isDefault && (
                         <button
                           className="btn-out"
                           style={{ fontSize: 12, padding: "5px 11px" }}
-                          onClick={() => onSetDefault(a.id)}
+                          onClick={(e) => { e.stopPropagation(); onSetDefault(a.id); }}
                         >
                           ⭐ Default
                         </button>
                       )}
                       <button
                         className="btn-out"
-                        style={{
-                          fontSize: 12,
-                          padding: "5px 11px",
-                          color: "var(--red)",
-                          borderColor: "#fca5a5",
-                        }}
-                        onClick={() => setDelConfirm(a.id)}
+                        style={{ fontSize: 12, padding: "5px 11px", color: "var(--red)", borderColor: "#fca5a5" }}
+                        onClick={(e) => { e.stopPropagation(); setDelConfirm(a.id); }}
                       >
                         {Ic.trash}
                       </button>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
               <button
                 className="btn-out"
@@ -5213,6 +5223,10 @@ export default function Customer() {
   const [custReady, setCustReady] = useState(false); // true once we know if user is known or new
   const [addresses, setAddresses] = useState([]);
   const [defaultAddrId, setDefaultAddrId] = useState(null);
+  // activeAddrId = address currently in use for delivery.
+  // Starts equal to defaultAddrId; customer can switch it in ProfileSheet or
+  // CheckoutSheet without changing the stored default.
+  const [activeAddrId, setActiveAddrId] = useState(null);
   const [orderHistory, setOrderHistory] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
 
@@ -5269,6 +5283,20 @@ export default function Customer() {
     );
     setDeliveryFeeInfo(info);
   }, [defaultAddrId, addresses, deliveryZones, restaurant, orderType]);
+
+  // Keep activeAddrId pointing to a valid address.
+  // On first load (null) → use defaultAddrId.
+  // If the active address was deleted → fall back to default or first address.
+  useEffect(() => {
+    if (addresses.length === 0) {
+      setActiveAddrId(null);
+      return;
+    }
+    const stillExists = addresses.some((a) => a.id === activeAddrId);
+    if (!stillExists) {
+      setActiveAddrId(defaultAddrId ?? addresses[0]?.id ?? null);
+    }
+  }, [addresses, defaultAddrId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* discount */
   const [appliedDiscount, setAppliedDiscount] = useState(null); // the validated Discount row
@@ -5677,18 +5705,20 @@ export default function Customer() {
   };
 
   /* place order — writes Orders + Order_Items + Order_Item_Variants + Order_Item_AddOns */
-  const placeOrder = async ({ address, payMethod, notes, orderType: ot }) => {
+  const placeOrder = async ({ address, payMethod, notes, orderType: ot, resolvedFeeInfo }) => {
     if (!customer || !restaurant) return;
     const isPickup = ot === "pickup";
-    // Resolve which fee to charge: pickup → 0; fixed fee → fixed; zone fee → zone.fee
+    // Use fee resolved inside CheckoutSheet (from the actually-selected address).
+    // Fall back to parent deliveryFeeInfo only as a safety net.
+    const feeInfo = resolvedFeeInfo ?? deliveryFeeInfo;
     let resolvedFee = 0;
     let resolvedZoneId = null;
     if (!isPickup) {
       if (restaurant.use_fixed_fee) {
         resolvedFee = Number(restaurant.fixed_delivery_fee ?? 0);
-      } else if (deliveryFeeInfo && !deliveryFeeInfo.outOfRange) {
-        resolvedFee = Number(deliveryFeeInfo.fee ?? 0);
-        resolvedZoneId = deliveryFeeInfo.zone?.id ?? null;
+      } else if (feeInfo && !feeInfo.outOfRange) {
+        resolvedFee = Number(feeInfo.fee ?? 0);
+        resolvedZoneId = feeInfo.zone?.id ?? null;
       }
     }
     const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount, resolvedFee, isPickup);
@@ -5945,6 +5975,8 @@ export default function Customer() {
   }
 
   const defaultAddr = addresses.find((a) => a.id === defaultAddrId);
+  // The address shown in the nav chip — whichever is active (may differ from default)
+  const activeAddr  = addresses.find((a) => a.id === activeAddrId) ?? defaultAddr;
 
   const catLabel =
     activeCat === "all"
@@ -6000,8 +6032,8 @@ export default function Customer() {
                   maxWidth: 180,
                 }}
               >
-                {defaultAddr
-                  ? `${defaultAddr.label} · ${defaultAddr.street}`
+                {activeAddr
+                  ? `${activeAddr.label} · ${activeAddr.street}`
                   : "Add delivery address"}
               </span>
               <svg
@@ -6599,8 +6631,8 @@ export default function Customer() {
           onClose={() => setShowCheckout(false)}
           onPlaceOrder={placeOrder}
           appliedDiscount={appliedDiscount}
-          discountAmt={calcTotals(cart, addonCart, appliedDiscount, deliveryFeeInfo?.fee ?? 0, orderType === "pickup").discountAmt}
-          subTotal={calcTotals(cart, addonCart, appliedDiscount, deliveryFeeInfo?.fee ?? 0, orderType === "pickup").subT}
+          discountAmt={calcTotals(cart, addonCart, appliedDiscount).discountAmt}
+          subTotal={calcTotals(cart, addonCart, appliedDiscount).subT}
           onAddAddress={() => {
             setShowCheckout(false);
             setShowProfile(true);
@@ -6609,7 +6641,9 @@ export default function Customer() {
           acceptPickup={restaurant?.accept_pickup ?? true}
           orderType={orderType}
           onOrderTypeChange={setOrderType}
-          deliveryFeeInfo={deliveryFeeInfo}
+          deliveryZones={deliveryZones}
+          initialAddrId={activeAddrId ?? defaultAddrId ?? null}
+          onAddrChange={setActiveAddrId}
         />
       )}
       {showTrack && lastOrder && (
