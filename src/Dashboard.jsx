@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { icon: "💬", label: "Inbox", id: "inbox", badge: 3 },
   { icon: "🚴", label: "Delivery", id: "delivery" },
   { icon: "⭐", label: "Reviews", id: "reviews", badge: 0 },
+  { icon: "⚙️", label: "Settings", id: "settings" },
 ];
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
@@ -14916,6 +14917,881 @@ function CancelOrderDetailButton({ order, t, darkMode }) {
   );
 }
 
+// ─── Settings Page ────────────────────────────────────────────────────────────
+function SettingsPage({ t, user }) {
+  const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
+
+  // ── form state ──────────────────────────────────────────────────────────────
+  const [name, setName] = useState("");
+  const [branch, setBranch] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  // Working hours stored as two 24-h time strings "HH:MM"; formatted to "H:MM AM/PM – H:MM AM/PM" on save
+  const [openTime, setOpenTime] = useState("11:00");
+  const [closeTime, setCloseTime] = useState("23:00");
+  const [minOrder, setMinOrder] = useState("");
+  const [lat, setLat] = useState("");
+  const [lng, setLng] = useState("");
+  const [plan, setPlan] = useState("");
+
+  // ── map state ───────────────────────────────────────────────────────────────
+  const mapContainerRef = useRef(null);
+  const leafletMapRef   = useRef(null);
+  const leafletMarkerRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapErr, setMapErr] = useState("");
+
+  // ── image state ─────────────────────────────────────────────────────────────
+  const [logoPath, setLogoPath] = useState("");
+  const [banner1, setBanner1] = useState("");
+  const [banner2, setBanner2] = useState("");
+  const [banner3, setBanner3] = useState("");
+  const [banner4, setBanner4] = useState("");
+
+  // ── UI state ────────────────────────────────────────────────────────────────
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState("");
+  const [saveOk, setSaveOk] = useState(false);
+  const [activeTab, setActiveTab] = useState("info"); // info | location | images
+  const [uploadingField, setUploadingField] = useState(null); // which image slot is uploading
+
+  // ── fetch restaurant on mount ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!restId) return;
+    setLoading(true);
+    supabase
+      .from("Restaurants")
+      .select("*")
+      .eq("id", restId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) { setLoading(false); return; }
+        setName(data.name || "");
+        setBranch(data.branch_name || "");
+        setPhone(data.ph_no || "");
+        setAddress(data.address || "");
+        // Parse "11:00 AM – 12:00 AM" → 24h time strings for <input type="time">
+        if (data.working_hours) {
+          try {
+            const to24h = (str) => {
+              const m = str.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+              if (!m) return null;
+              let h = parseInt(m[1], 10);
+              const min = m[2];
+              const ampm = m[3].toUpperCase();
+              if (ampm === "AM" && h === 12) h = 0;
+              if (ampm === "PM" && h !== 12) h += 12;
+              return `${String(h).padStart(2,"0")}:${min}`;
+            };
+            const parts = data.working_hours.split("–").map(s => s.trim());
+            const o = to24h(parts[0]);
+            const c = to24h(parts[1]);
+            if (o) setOpenTime(o);
+            if (c) setCloseTime(c);
+          } catch (_) { /* keep defaults */ }
+        }
+        setMinOrder(data.min_order != null ? String(data.min_order) : "");
+        setLat(data.latitude != null ? String(data.latitude) : "");
+        setLng(data.longitude != null ? String(data.longitude) : "");
+        setPlan(data.sub_plan || "Basic");
+        setLogoPath(data.logo_path || "");
+        setBanner1(data.image1_path || "");
+        setBanner2(data.image2_path || "");
+        setBanner3(data.image3_path || "");
+        setBanner4(data.image4_path || "");
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [restId]);
+
+  // ── save info ───────────────────────────────────────────────────────────────
+  const handleSave = async () => {
+    setSaving(true); setSaveErr(""); setSaveOk(false);
+    try {
+      // Format "HH:MM" → "H:MM AM/PM"
+      const to12h = (t24) => {
+        if (!t24) return "";
+        const [hStr, mStr] = t24.split(":");
+        let h = parseInt(hStr, 10);
+        const m = mStr || "00";
+        const ampm = h < 12 ? "AM" : "PM";
+        if (h === 0) h = 12;
+        else if (h > 12) h -= 12;
+        return `${h}:${m} ${ampm}`;
+      };
+      const workingHoursFormatted = (openTime && closeTime)
+        ? `${to12h(openTime)} – ${to12h(closeTime)}`
+        : null;
+
+      const payload = {
+        name: name.trim() || undefined,
+        branch_name: branch.trim() || null,
+        ph_no: phone.trim() || undefined,
+        address: address.trim() || null,
+        working_hours: workingHoursFormatted,
+        min_order: minOrder !== "" ? Number(minOrder) : null,
+        latitude: lat !== "" ? Number(lat) : undefined,
+        longitude: lng !== "" ? Number(lng) : undefined,
+        logo_path: logoPath || null,
+        image1_path: banner1 || null,
+        image2_path: banner2 || null,
+        image3_path: banner3 || null,
+        image4_path: banner4 || null,
+      };
+      // Remove undefined keys
+      Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+      const { error } = await supabase.from("Restaurants").update(payload).eq("id", restId);
+      if (error) throw error;
+      setSaveOk(true);
+      setTimeout(() => setSaveOk(false), 3000);
+    } catch (e) {
+      setSaveErr(e?.message || "Failed to save. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── image upload helper ─────────────────────────────────────────────────────
+  // ── Leaflet loader (CDN, idempotent) ────────────────────────────────────────
+  const loadSettingsLeaflet = useCallback((cb) => {
+    // Already loaded
+    if (window.L && window.__settingsLeafletLoaded) { cb(); return; }
+
+    // Script already in DOM — poll until ready
+    if (document.getElementById("settings-leaflet-js")) {
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        if (window.L && window.__settingsLeafletLoaded) { clearInterval(poll); cb(); return; }
+        if (attempts > 100) { clearInterval(poll); setMapErr("Map library timed out. Try refreshing."); }
+      }, 80);
+      return;
+    }
+
+    // Inject CSS
+    if (!document.getElementById("settings-leaflet-css")) {
+      const css = document.createElement("link");
+      css.id = "settings-leaflet-css";
+      css.rel = "stylesheet";
+      css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(css);
+    }
+
+    // Inject JS
+    const js = document.createElement("script");
+    js.id = "settings-leaflet-js";
+    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.onload = () => { window.__settingsLeafletLoaded = true; cb(); };
+    js.onerror = () => setMapErr("Map library failed to load. Check your connection.");
+    document.head.appendChild(js);
+  }, []);
+
+  // ── Fully destroy any existing Leaflet instance on a container ──────────────
+  const destroyMap = useCallback(() => {
+    if (leafletMapRef.current) {
+      try { leafletMapRef.current.off(); leafletMapRef.current.remove(); } catch (_) {}
+      leafletMapRef.current = null;
+      leafletMarkerRef.current = null;
+    }
+    // Clear Leaflet's internal container flag so the div can be reused
+    if (mapContainerRef.current) {
+      delete mapContainerRef.current._leaflet_id;
+      // Also clear any child nodes Leaflet injected
+      try {
+        const lPanes = mapContainerRef.current.querySelector(".leaflet-pane");
+        if (lPanes) mapContainerRef.current.innerHTML = "";
+      } catch (_) {}
+    }
+    setMapReady(false);
+  }, []);
+
+  // ── Init map — always build fresh, never reuse stale instance ───────────────
+  const initMap = useCallback(() => {
+    const L = window.L;
+    if (!L || !mapContainerRef.current) return;
+
+    const DEFAULT_LAT = 29.3759, DEFAULT_LNG = 47.9774;
+    // Read the current lat/lng from state refs so the closure has the latest values
+    const initLat = latRef.current && !isNaN(Number(latRef.current)) ? Number(latRef.current) : DEFAULT_LAT;
+    const initLng = lngRef.current && !isNaN(Number(lngRef.current)) ? Number(lngRef.current) : DEFAULT_LNG;
+
+    // Destroy any existing instance first (handles navigate-away → navigate-back)
+    destroyMap();
+
+    try {
+      const map = L.map(mapContainerRef.current, {
+        zoomControl: true,
+        scrollWheelZoom: true,
+        dragging: true,
+        tap: false, // avoid double-event on iOS
+        preferCanvas: false,
+      }).setView([initLat, initLng], 14);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap contributors",
+        maxZoom: 19,
+        crossOrigin: true,
+      }).addTo(map);
+
+      const pinIcon = L.divIcon({
+        html: `<div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+          <div style="position:absolute;width:36px;height:36px;border-radius:50%;background:rgba(196,113,26,.22);animation:settingsPulse 1.8s ease-out infinite;"></div>
+          <div style="width:18px;height:18px;border-radius:50%;background:#C4711A;border:3px solid #fff;box-shadow:0 2px 10px rgba(196,113,26,.6);position:relative;z-index:1;"></div>
+        </div>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+        className: "",
+      });
+
+      const marker = L.marker([initLat, initLng], { draggable: true, icon: pinIcon }).addTo(map);
+      leafletMarkerRef.current = marker;
+
+      const updateCoords = ({ lat: la, lng: ln }) => {
+        const laF = la.toFixed(6);
+        const lnF = ln.toFixed(6);
+        setLat(laF); latRef.current = laF;
+        setLng(lnF); lngRef.current = lnF;
+      };
+
+      marker.on("dragend", (e) => updateCoords(e.target.getLatLng()));
+      map.on("click", (e) => { marker.setLatLng(e.latlng); updateCoords(e.latlng); });
+
+      leafletMapRef.current = map;
+
+      // invalidateSize after a frame so the container has its final dimensions
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try { map.invalidateSize({ animate: false }); } catch (_) {}
+          setMapReady(true);
+        });
+      });
+    } catch (e) {
+      setMapErr("Could not initialise map: " + (e?.message || "unknown error"));
+    }
+  }, [destroyMap]);
+
+  // Refs that always hold the latest lat/lng so initMap closure can read them
+  const latRef = useRef(lat);
+  const lngRef = useRef(lng);
+  useEffect(() => { latRef.current = lat; }, [lat]);
+  useEffect(() => { lngRef.current = lng; }, [lng]);
+
+  // ── Trigger map build whenever location tab becomes active ───────────────────
+  useEffect(() => {
+    if (activeTab !== "location") {
+      // When leaving location tab destroy cleanly so next visit starts fresh
+      destroyMap();
+      return;
+    }
+    setMapErr("");
+    // Wait two frames: one for React to render the container, one for layout
+    let raf1, raf2;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        loadSettingsLeaflet(initMap);
+      });
+    });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [activeTab, loadSettingsLeaflet, initMap, destroyMap]);
+
+  // ── Destroy on component unmount ────────────────────────────────────────────
+  useEffect(() => { return () => destroyMap(); }, [destroyMap]);
+  // field: "logo" → feastrush-menu/{restId}/logo/{filename}
+  // field: "banner1"…"banner4" → feastrush-menu/{restId}/Banner/{filename}
+  // After upload, public URL is saved directly to Restaurants table.
+  const DB_FIELD_MAP = {
+    logo:    "logo_path",
+    banner1: "image1_path",
+    banner2: "image2_path",
+    banner3: "image3_path",
+    banner4: "image4_path",
+  };
+
+  const handleImageUpload = async (file, field, setState) => {
+    if (!file) return;
+    const maxMb = 5;
+    if (file.size > maxMb * 1024 * 1024) {
+      setSaveErr(`Image too large. Max ${maxMb} MB allowed.`); return;
+    }
+    const ext = file.name.split(".").pop().toLowerCase();
+    const allowed = ["jpg", "jpeg", "png", "webp", "gif"];
+    if (!allowed.includes(ext)) {
+      setSaveErr("Only JPG, PNG, WEBP or GIF images are allowed."); return;
+    }
+    setUploadingField(field);
+    setSaveErr("");
+    try {
+      const bucket = "feastrush-menu";
+      const folder = field === "logo" ? "logo" : "Banner";
+      const filename = `${field}_${Date.now()}.${ext}`;
+      // Supabase Storage auto-creates folders on first upload — no explicit mkdir needed.
+      const storagePath = `${restId}/${folder}/${filename}`;
+
+      const { error: upErr } = await supabase.storage
+        .from(bucket)
+        .upload(storagePath, file, { upsert: true, contentType: file.type });
+      if (upErr) throw upErr;
+
+      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+      const publicUrl = urlData?.publicUrl;
+      if (!publicUrl) throw new Error("Could not retrieve public URL after upload.");
+
+      // Persist to DB immediately so the change is saved even if user doesn't click Save
+      const dbCol = DB_FIELD_MAP[field];
+      if (dbCol && restId) {
+        const { error: dbErr } = await supabase
+          .from("Restaurants")
+          .update({ [dbCol]: publicUrl })
+          .eq("id", restId);
+        if (dbErr) throw dbErr;
+      }
+
+      setState(publicUrl);
+    } catch (e) {
+      setSaveErr(e?.message || "Upload failed. Please try again.");
+    } finally {
+      setUploadingField(null);
+    }
+  };
+
+  // ── sub-components ──────────────────────────────────────────────────────────
+  const tabs = [
+    { id: "info",     label: "Info",     icon: "📋" },
+    { id: "location", label: "Location", icon: "📍" },
+    { id: "images",   label: "Images",   icon: "🖼️" },
+  ];
+
+  const inp = (value, onChange, placeholder, type = "text", extra = {}) => (
+    <input
+      type={type}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      {...extra}
+      style={{
+        background: t.surface2, border: `1px solid ${t.border2}`,
+        color: t.text, fontFamily: "'Lato', sans-serif",
+        borderRadius: 8, padding: "10px 14px", fontSize: 13,
+        width: "100%", outline: "none", transition: "border-color .2s",
+        ...extra.style,
+      }}
+      onFocus={e => e.target.style.borderColor = t.accent}
+      onBlur={e => e.target.style.borderColor = t.border2}
+    />
+  );
+
+  const lbl = (text, hint) => (
+    <div style={{ marginBottom: 6 }}>
+      <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>
+        {text}
+      </span>
+      {hint && <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 10, marginLeft: 6 }}>{hint}</span>}
+    </div>
+  );
+
+  const row = (children, cols = 1) => (
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 14, marginBottom: 18 }}>
+      {children}
+    </div>
+  );
+
+  const ImageSlot = ({ label, value, field }) => {
+    const fileRef = useRef();
+    const isUploading = uploadingField === field;
+    const [imgErr, setImgErr] = useState(false);
+    const stateSetters = { banner1: setBanner1, banner2: setBanner2, banner3: setBanner3, banner4: setBanner4 };
+    const setState = stateSetters[field];
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        <div style={{ marginBottom: 8 }}>
+          <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>{label}</span>
+        </div>
+        {/* Preview tile */}
+        <div
+          onClick={() => !isUploading && fileRef.current?.click()}
+          style={{
+            width: "100%", aspectRatio: "16/9", borderRadius: 10, overflow: "hidden",
+            border: `1.5px dashed ${value && !imgErr ? t.accent + "60" : t.border}`,
+            background: t.surface2, position: "relative",
+            cursor: isUploading ? "wait" : "pointer", transition: "border-color .2s, transform .15s",
+          }}
+          onMouseEnter={e => { if (!isUploading) { e.currentTarget.style.borderColor = t.accent; e.currentTarget.style.transform = "scale(1.01)"; }}}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = value && !imgErr ? t.accent + "60" : t.border; e.currentTarget.style.transform = "scale(1)"; }}
+        >
+          {value && !imgErr ? (
+            <>
+              <img
+                src={value}
+                alt={label}
+                onError={() => setImgErr(true)}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+              {/* Hover overlay */}
+              <div style={{
+                position: "absolute", inset: 0,
+                background: "linear-gradient(to top, rgba(0,0,0,.65) 0%, transparent 60%)",
+                display: "flex", alignItems: "flex-end", justifyContent: "center",
+                paddingBottom: 10, opacity: 0, transition: "opacity .2s",
+              }}
+                onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                onMouseLeave={e => e.currentTarget.style.opacity = 0}
+              >
+                <span style={{ color: "#fff", fontSize: 12, fontWeight: 700, fontFamily: "'Lato', sans-serif", background: "rgba(0,0,0,.35)", borderRadius: 6, padding: "4px 10px" }}>
+                  {isUploading ? "⏳ Uploading…" : "📷 Change image"}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <span style={{ fontSize: isUploading ? 24 : 28 }}>{isUploading ? "⏳" : "📷"}</span>
+              <span style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 500 }}>
+                {isUploading ? "Uploading…" : "Click to upload"}
+              </span>
+            </div>
+          )}
+          {/* Full-tile uploading overlay */}
+          {isUploading && (
+            <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "'Lato', sans-serif" }}>Uploading…</span>
+            </div>
+          )}
+        </div>
+        <input
+          ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+          style={{ display: "none" }}
+          onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) handleImageUpload(f, field, (url) => { if (setState) setState(url); setImgErr(false); });
+            e.target.value = "";
+          }}
+        />
+      </div>
+    );
+  };
+
+  if (loading) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
+        <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 14 }}>Loading settings…</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: "28px 20px 60px" }}>
+      {/* Page header */}
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontFamily: "'Cormorant Garamond', serif", color: t.text, fontSize: 28, fontWeight: 700, marginBottom: 4 }}>
+          Restaurant Settings
+        </h1>
+        <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+          Manage your restaurant profile, location and images.
+        </p>
+      </div>
+
+      {/* Subscription plan banner */}
+      <div style={{
+        background: t.accentBg, border: `1px solid ${t.accentBorder}`,
+        borderRadius: 12, padding: "14px 18px", marginBottom: 24,
+        display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+      }}>
+        <span style={{ fontSize: 28 }}>👑</span>
+        <div>
+          <p style={{ color: t.accent, fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>
+            {plan} Plan
+          </p>
+          <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, marginTop: 2 }}>
+            Your current subscription · Contact support to upgrade
+          </p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 24, background: t.surface2, borderRadius: 10, padding: 4 }}>
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              flex: 1, padding: "9px 8px", borderRadius: 8, border: "none", cursor: "pointer",
+              background: activeTab === tab.id ? t.surface : "transparent",
+              color: activeTab === tab.id ? t.accent : t.subtle,
+              fontFamily: "'Lato', sans-serif", fontSize: 13, fontWeight: 600,
+              boxShadow: activeTab === tab.id ? "0 1px 6px rgba(0,0,0,.10)" : "none",
+              transition: "all .2s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>{tab.icon}</span>
+            <span className="hidden sm:inline">{tab.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: "24px 20px", animation: "fadeInUp .22s ease" }}>
+        <style>{`@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`}</style>
+
+        {/* ── INFO TAB ── */}
+        {activeTab === "info" && (
+          <div>
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 20 }}>
+              Basic Information
+            </p>
+
+            {row([
+              <div key="name">
+                {lbl("Restaurant Name", "*required")}
+                {inp(name, setName, "e.g. My Restaurant")}
+              </div>,
+              <div key="branch">
+                {lbl("Branch Name", "optional")}
+                {inp(branch, setBranch, "e.g. Salmiya Branch")}
+              </div>,
+            ], 2)}
+
+            {row([
+              <div key="phone">
+                {lbl("Phone Number")}
+                {inp(phone, setPhone, "e.g. +965 9999 9999", "tel")}
+              </div>,
+              <div key="minorder">
+                {lbl("Minimum Order (KD)")}
+                {inp(minOrder, setMinOrder, "e.g. 2.000", "number", { min: "0", step: "0.001" })}
+              </div>,
+            ], 2)}
+
+            <div style={{ marginBottom: 18 }}>
+              {lbl("Address")}
+              {inp(address, setAddress, "e.g. Block 4, Street 12, Salmiya")}
+            </div>
+
+            <div style={{ marginBottom: 0 }}>
+              {lbl("Working Hours")}
+              {/* Time pickers — formatted to "H:MM AM – H:MM PM" on save */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 10, alignItems: "center" }}>
+                <div>
+                  <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 10, marginBottom: 5 }}>Opens</p>
+                  <input
+                    type="time"
+                    value={openTime}
+                    onChange={e => setOpenTime(e.target.value)}
+                    style={{
+                      background: t.surface2, border: `1px solid ${t.border2}`,
+                      color: t.text, fontFamily: "'Lato', sans-serif",
+                      borderRadius: 8, padding: "10px 14px", fontSize: 13,
+                      width: "100%", outline: "none", cursor: "pointer",
+                    }}
+                    onFocus={e => e.target.style.borderColor = t.accent}
+                    onBlur={e => e.target.style.borderColor = t.border2}
+                  />
+                </div>
+                <div style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 18, fontWeight: 300, paddingTop: 22, textAlign: "center" }}>–</div>
+                <div>
+                  <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 10, marginBottom: 5 }}>Closes</p>
+                  <input
+                    type="time"
+                    value={closeTime}
+                    onChange={e => setCloseTime(e.target.value)}
+                    style={{
+                      background: t.surface2, border: `1px solid ${t.border2}`,
+                      color: t.text, fontFamily: "'Lato', sans-serif",
+                      borderRadius: 8, padding: "10px 14px", fontSize: 13,
+                      width: "100%", outline: "none", cursor: "pointer",
+                    }}
+                    onFocus={e => e.target.style.borderColor = t.accent}
+                    onBlur={e => e.target.style.borderColor = t.border2}
+                  />
+                </div>
+              </div>
+              {/* Live preview of what gets saved */}
+              {openTime && closeTime && (
+                <div style={{
+                  marginTop: 10, padding: "8px 12px",
+                  background: t.accentBg, border: `1px solid ${t.accentBorder}`,
+                  borderRadius: 8, display: "inline-flex", alignItems: "center", gap: 7,
+                }}>
+                  <span style={{ fontSize: 13 }}>🕐</span>
+                  <span style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600 }}>
+                    {(() => {
+                      const to12h = (t24) => {
+                        if (!t24) return "";
+                        const [hStr, mStr] = t24.split(":");
+                        let h = parseInt(hStr, 10);
+                        const m = mStr || "00";
+                        const ampm = h < 12 ? "AM" : "PM";
+                        if (h === 0) h = 12;
+                        else if (h > 12) h -= 12;
+                        return `${h}:${m} ${ampm}`;
+                      };
+                      return `Preview: ${to12h(openTime)} – ${to12h(closeTime)}`;
+                    })()}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── LOCATION TAB ── */}
+        {activeTab === "location" && (
+          <div>
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 12 }}>
+              Map Location
+            </p>
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginBottom: 16, lineHeight: 1.6 }}>
+              Click anywhere on the map or drag the pin to set your restaurant's location.
+            </p>
+
+            {/* Leaflet map container */}
+            <style>{`
+              @keyframes settingsPulse {
+                0%   { transform:scale(1);   opacity:.7 }
+                70%  { transform:scale(2.6); opacity:0  }
+                100% { transform:scale(1);   opacity:0  }
+              }
+              #settings-map-wrap .leaflet-container { border-radius: 12px; }
+            `}</style>
+
+            {mapErr ? (
+              <div style={{
+                height: 260, borderRadius: 12, background: t.surface2,
+                border: `1px solid ${t.border}`, display: "flex",
+                flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
+              }}>
+                <span style={{ fontSize: 32 }}>🗺️</span>
+                <p style={{ color: t.red, fontFamily: "'Lato', sans-serif", fontSize: 13, textAlign: "center", padding: "0 20px" }}>{mapErr}</p>
+                <button
+                  onClick={() => { setMapErr(""); setMapReady(false); leafletMapRef.current = null; setActiveTab("info"); setTimeout(() => setActiveTab("location"), 50); }}
+                  style={{ color: t.accent, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <div id="settings-map-wrap" style={{ position: "relative", marginBottom: 16 }}>
+                {/* Loading shimmer shown until Leaflet fires */}
+                {!mapReady && (
+                  <div style={{
+                    position: "absolute", inset: 0, zIndex: 10,
+                    borderRadius: 12, background: t.surface2,
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
+                    border: `1px solid ${t.border}`,
+                  }}>
+                    <span style={{ fontSize: 28 }}>🗺️</span>
+                    <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12 }}>Loading map…</p>
+                  </div>
+                )}
+                <div
+                  ref={mapContainerRef}
+                  style={{
+                    width: "100%", height: "clamp(220px, 40vw, 340px)",
+                    borderRadius: 12, overflow: "hidden",
+                    border: `1px solid ${t.border}`,
+                    opacity: mapReady ? 1 : 0,
+                    transition: "opacity .3s ease",
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Coordinate readout + manual override */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div>
+                {lbl("Latitude")}
+                <input
+                  type="number" step="any" value={lat}
+                  onChange={e => {
+                    setLat(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && leafletMarkerRef.current && leafletMapRef.current) {
+                      const lngV = parseFloat(lng);
+                      if (!isNaN(lngV)) {
+                        leafletMarkerRef.current.setLatLng([v, lngV]);
+                        leafletMapRef.current.setView([v, lngV], leafletMapRef.current.getZoom());
+                      }
+                    }
+                  }}
+                  placeholder="e.g. 29.3759"
+                  style={{
+                    background: t.surface2, border: `1px solid ${t.border2}`,
+                    color: t.text, fontFamily: "'Lato', sans-serif", fontVariantNumeric: "tabular-nums",
+                    borderRadius: 8, padding: "9px 12px", fontSize: 13, width: "100%", outline: "none",
+                  }}
+                  onFocus={e => e.target.style.borderColor = t.accent}
+                  onBlur={e => e.target.style.borderColor = t.border2}
+                />
+              </div>
+              <div>
+                {lbl("Longitude")}
+                <input
+                  type="number" step="any" value={lng}
+                  onChange={e => {
+                    setLng(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && leafletMarkerRef.current && leafletMapRef.current) {
+                      const latV = parseFloat(lat);
+                      if (!isNaN(latV)) {
+                        leafletMarkerRef.current.setLatLng([latV, v]);
+                        leafletMapRef.current.setView([latV, v], leafletMapRef.current.getZoom());
+                      }
+                    }
+                  }}
+                  placeholder="e.g. 47.9774"
+                  style={{
+                    background: t.surface2, border: `1px solid ${t.border2}`,
+                    color: t.text, fontFamily: "'Lato', sans-serif", fontVariantNumeric: "tabular-nums",
+                    borderRadius: 8, padding: "9px 12px", fontSize: 13, width: "100%", outline: "none",
+                  }}
+                  onFocus={e => e.target.style.borderColor = t.accent}
+                  onBlur={e => e.target.style.borderColor = t.border2}
+                />
+              </div>
+            </div>
+
+            {/* Google Maps preview link */}
+            {lat && lng && !isNaN(Number(lat)) && !isNaN(Number(lng)) && (
+              <a
+                href={`https://www.google.com/maps?q=${lat},${lng}`}
+                target="_blank" rel="noreferrer"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  color: t.accent, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600,
+                  background: t.accentBg, border: `1px solid ${t.accentBorder}`,
+                  borderRadius: 8, padding: "7px 14px", textDecoration: "none", transition: "opacity .15s",
+                }}
+              >
+                📍 Verify on Google Maps ↗
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* ── IMAGES TAB ── */}
+        {activeTab === "images" && (
+          <div>
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 20 }}>
+              Logo & Banner Images
+            </p>
+
+            {/* Logo */}
+            <div style={{ marginBottom: 28 }}>
+              {lbl("Restaurant Logo")}
+              <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+                {/* Logo preview square */}
+                <div
+                  onClick={() => !uploadingField && document.getElementById("logo-file-input")?.click()}
+                  style={{
+                    width: 100, height: 100, borderRadius: 16, overflow: "hidden", flexShrink: 0,
+                    border: `1.5px dashed ${logoPath ? t.accent + "60" : t.border}`,
+                    background: t.surface2, display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: uploadingField === "logo" ? "wait" : "pointer", position: "relative",
+                    transition: "border-color .2s, transform .15s",
+                  }}
+                  onMouseEnter={e => { if (uploadingField !== "logo") { e.currentTarget.style.borderColor = t.accent; e.currentTarget.style.transform = "scale(1.03)"; }}}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = logoPath ? t.accent + "60" : t.border; e.currentTarget.style.transform = "scale(1)"; }}
+                >
+                  {logoPath
+                    ? <img src={logoPath} alt="Logo" onError={e => e.target.style.display = "none"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <span style={{ fontSize: 34, color: t.muted }}>🏪</span>
+                  }
+                  {uploadingField === "logo" && (
+                    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.52)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <span style={{ color: "#fff", fontSize: 22 }}>⏳</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right side — description + upload button */}
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
+                    Recommended: square image, min 200×200px.<br/>JPG, PNG or WEBP, max 5 MB.
+                  </p>
+                  <button
+                    onClick={() => document.getElementById("logo-file-input")?.click()}
+                    disabled={!!uploadingField}
+                    style={{
+                      background: t.accentBg, border: `1px solid ${t.accentBorder}`,
+                      color: t.accent, fontFamily: "'Lato', sans-serif", fontWeight: 700,
+                      fontSize: 12, padding: "9px 18px", borderRadius: 8,
+                      cursor: uploadingField ? "not-allowed" : "pointer",
+                      opacity: uploadingField ? .5 : 1, transition: "opacity .2s",
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                    }}
+                  >
+                    {uploadingField === "logo" ? "⏳ Uploading…" : "📷 Upload logo"}
+                  </button>
+                  <input
+                    id="logo-file-input" type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    style={{ display: "none" }}
+                    onChange={e => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImageUpload(f, "logo", setLogoPath);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Banner images 2-up grid */}
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 14 }}>
+              Banner Images (slideshow)
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <ImageSlot label="Banner 1" value={banner1} field="banner1" />
+              <ImageSlot label="Banner 2" value={banner2} field="banner2" />
+              <ImageSlot label="Banner 3" value={banner3} field="banner3" />
+              <ImageSlot label="Banner 4" value={banner4} field="banner4" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Save bar ── */}
+      <div style={{
+        position: "sticky", bottom: 0, left: 0, right: 0,
+        background: t.surface, borderTop: `1px solid ${t.border}`,
+        padding: "14px 20px", marginTop: 20,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 12, flexWrap: "wrap", borderRadius: 12,
+        boxShadow: "0 -4px 24px rgba(0,0,0,.08)",
+        zIndex: 10,
+      }}>
+        <div>
+          {saveErr && (
+            <p style={{ color: t.red, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600 }}>
+              ⚠️ {saveErr}
+            </p>
+          )}
+          {saveOk && (
+            <p style={{ color: t.green, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600 }}>
+              ✅ Settings saved successfully!
+            </p>
+          )}
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving || uploadingField !== null}
+          style={{
+            background: saving || uploadingField !== null ? t.border2 : t.accent,
+            color: saving || uploadingField !== null ? t.muted : "#fff",
+            fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14,
+            padding: "11px 28px", borderRadius: 10, border: "none",
+            cursor: saving || uploadingField !== null ? "not-allowed" : "pointer",
+            transition: "all .2s", minWidth: 120,
+          }}
+        >
+          {saving ? "Saving…" : uploadingField ? "Uploading…" : "Save Changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Root Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard({ user, onLogout }) {
   const [activeNav, setActiveNav] = useState("home");
@@ -15032,6 +15908,8 @@ export default function Dashboard({ user, onLogout }) {
             setCustomEnd={setHomeCustomEnd}
           />
         );
+      case "settings":
+        return <SettingsPage t={t} user={user} />;
       case "orders":
         return <OrdersPage t={t} user={user} />;
       case "delivery":
@@ -15159,30 +16037,6 @@ export default function Dashboard({ user, onLogout }) {
               {acceptedCount}
             </span>
           </div>
-          <div
-            style={{ background: t.surface2, border: `1px solid ${t.border2}` }}
-            className="hidden sm:flex items-center gap-2 rounded-lg px-3 py-1.5"
-          >
-            <span
-              style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-              className="text-xs font-medium"
-            >
-              Delivery
-            </span>
-            <Toggle value={delivery} onChange={handleDeliveryToggle} t={t} />
-          </div>
-          <div
-            style={{ background: t.surface2, border: `1px solid ${t.border2}` }}
-            className="hidden sm:flex items-center gap-2 rounded-lg px-3 py-1.5"
-          >
-            <span
-              style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
-              className="text-xs font-medium"
-            >
-              Pickup
-            </span>
-            <Toggle value={pickup} onChange={handlePickupToggle} t={t} />
-          </div>
           <ThemeBtn
             dark={darkMode}
             onToggle={() => setDarkMode((d) => !d)}
@@ -15256,10 +16110,30 @@ export default function Dashboard({ user, onLogout }) {
             ))}
           </nav>
 
-          {/*
-            FIX: User info + sign-out pinned at bottom with flex-shrink-0.
-            Previously this could get squeezed off-screen when nav was too tall.
-          */}
+          {/* ── Delivery / Pickup toggles — visible in sidebar (all screen sizes) ── */}
+          <div style={{ borderTop: `1px solid ${t.border}`, padding: "12px 14px", flexShrink: 0 }}>
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 10 }}>
+              Service Availability
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: t.surface2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: "8px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ fontSize: 14 }}>🚴</span>
+                  <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600 }}>Delivery</span>
+                </div>
+                <Toggle value={delivery} onChange={handleDeliveryToggle} t={t} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: t.surface2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: "8px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ fontSize: 14 }}>🛍️</span>
+                  <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600 }}>Pickup</span>
+                </div>
+                <Toggle value={pickup} onChange={handlePickupToggle} t={t} />
+              </div>
+            </div>
+          </div>
+
+          {/* User info + sign-out pinned at bottom */}
           <div
             style={{ borderTop: `1px solid ${t.border}` }}
             className="p-4 flex-shrink-0"
