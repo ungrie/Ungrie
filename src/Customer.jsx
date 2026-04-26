@@ -726,6 +726,9 @@ a{text-decoration:none}
   border-bottom:1px solid var(--border);
   padding:0;
   overflow:hidden;
+  isolation:isolate;
+  position:relative;
+  z-index:0;
 }
 .rest-info-bar{
   display:flex;align-items:center;gap:0;
@@ -752,6 +755,9 @@ a{text-decoration:none}
   max-height:0;
   transition:max-height .45s cubic-bezier(.4,0,.2,1), opacity .35s ease;
   opacity:0;
+  isolation:isolate;
+  position:relative;
+  z-index:0;
 }
 .rest-map-panel.open{
   max-height:260px;
@@ -761,6 +767,8 @@ a{text-decoration:none}
   height:220px;
   border-top:1px solid var(--border);
   position:relative;
+  isolation:isolate;
+  z-index:0;
 }
 #rest-leaflet-map{width:100%;height:100%}
 @media(min-width:480px){
