@@ -8640,7 +8640,10 @@ function printInvoice(order, items, restaurant, discount, deliveryAddr) {
     (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
     0,
   );
-  const deliveryFee = isPickup ? 0 : 0.5;
+  // Use the stored delivery_fee from the order row (0 for pickup, zone fee for delivery)
+  const deliveryFee = isPickup ? 0 : Number(order.delivery_fee ?? 0);
+  // Zone label for invoice — passed as part of order or resolved separately
+  const zoneLabel = !isPickup && order.zone_name ? ` (${order.zone_name})` : "";
   const discountAmt = discount?.amount_saved ?? 0;
   const grandTotal = Number(
     order.total_amount ?? itemsSubtotal + deliveryFee - discountAmt,
@@ -8877,7 +8880,7 @@ function printInvoice(order, items, restaurant, discount, deliveryAddr) {
         </div>
         ${!isPickup ? `
         <div class="tally-row">
-          <span class="tally-label">Delivery fee</span>
+          <span class="tally-label">Delivery fee${zoneLabel}</span>
           <span class="tally-value">KD ${deliveryFee.toFixed(3)}</span>
         </div>` : ""}
         ${discountRow}
@@ -8939,6 +8942,23 @@ function OrdersPage({ t, user }) {
   const [riders, setRiders] = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionErr, setActionErr] = useState("");
+  const [zoneName, setZoneName] = useState(null); // zone name for the selected order
+
+  // ── Fetch zone name for a given zone_id ───────────────────────────────────
+  const fetchZoneName = useCallback(async (zoneId) => {
+    setZoneName(null);
+    if (!zoneId) return;
+    try {
+      const { data } = await supabase
+        .from("Delivery_Zones")
+        .select("name")
+        .eq("id", zoneId)
+        .maybeSingle();
+      setZoneName(data?.name ?? null);
+    } catch (e) {
+      console.warn("[fetchZoneName]", e);
+    }
+  }, []);
 
   // ── Fetch orders ───────────────────────────────────────────────────────────
   const fetchOrders = useCallback(async () => {
@@ -8953,6 +8973,7 @@ function OrdersPage({ t, user }) {
         .select(
           `id, status, total_amount, payment_method, payment_status, notes, created_at,
                  delivery_rider_name, delivery_rider_phone, order_type,
+                 delivery_fee, zone_id,
                  cust_id, Customer(id, cust_name, ph_num)`,
         )
         .eq("rest_id", restId)
@@ -9082,7 +9103,7 @@ function OrdersPage({ t, user }) {
             const { data } = await supabase
               .from("Orders")
               .select(
-                `id, status, total_amount, payment_method, payment_status, notes, created_at, delivery_rider_name, delivery_rider_phone, order_type, cust_id, Customer(id, cust_name, ph_num)`,
+                `id, status, total_amount, payment_method, payment_status, notes, created_at, delivery_rider_name, delivery_rider_phone, order_type, delivery_fee, zone_id, cust_id, Customer(id, cust_name, ph_num)`,
               )
               .eq("id", payload.new.id)
               .single();
@@ -9116,6 +9137,7 @@ function OrdersPage({ t, user }) {
     fetchOrderItems(order.id);
     fetchDeliveryAddr(order.cust_id);
     fetchOrderDiscount(order.id);
+    fetchZoneName(order.zone_id ?? null);
     setActionErr("");
   };
 
@@ -9371,6 +9393,7 @@ function OrdersPage({ t, user }) {
                   ...selectedOrder,
                   cust_name: custName,
                   cust_phone: custPhone,
+                  zone_name: zoneName ?? null,
                 },
                 orderItems,
                 null,
@@ -9523,12 +9546,30 @@ function OrdersPage({ t, user }) {
                     style={{ color: t.subtle, fontFamily: "'Lato', sans-serif" }}
                   >
                     Delivery fee
+                    {zoneName && (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: t.surface2,
+                          border: `1px solid ${t.border}`,
+                          color: t.muted,
+                          borderRadius: 99,
+                          padding: "1px 7px",
+                          letterSpacing: ".03em",
+                          fontFamily: "'Lato', sans-serif",
+                        }}
+                      >
+                        {zoneName}
+                      </span>
+                    )}
                   </span>
                   <span
                     style={{ color: t.text, fontFamily: "'Lato', sans-serif" }}
                     className="font-medium"
                   >
-                    KD 0.500
+                    {fmtKD(selectedOrder.delivery_fee ?? 0)}
                   </span>
                 </div>
               )}
@@ -14660,7 +14701,9 @@ function CancelOrderDetailButton({ order, t, darkMode }) {
   const itemsSubtotal = items.reduce(
     (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0), 0
   );
-  const deliveryFee = 0.5;
+  // Use stored delivery_fee from the order row; 0 for pickup or when null
+  const isPickupOrder = order.order_type === "pickup";
+  const deliveryFee = isPickupOrder ? 0 : Number(order.delivery_fee ?? 0);
   const discountAmt = discount?.amount_saved ?? 0;
 
   const modal = open ? (
@@ -14840,9 +14883,27 @@ function CancelOrderDetailButton({ order, t, darkMode }) {
           )}
 
           {/* Delivery fee — only for delivery orders */}
-          {order.order_type !== "pickup" && (
+          {!isPickupOrder && (
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: discountAmt > 0 ? 8 : 0 }}>
-              <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Delivery fee</span>
+              <span style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>
+                Delivery fee
+                {order.zone_id && (
+                  <span style={{
+                    marginLeft: 6,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    background: t.surface,
+                    border: `1px solid ${t.border}`,
+                    color: t.muted,
+                    borderRadius: 99,
+                    padding: "1px 7px",
+                    letterSpacing: ".03em",
+                    fontFamily: "'Lato', sans-serif",
+                  }}>
+                    zone #{order.zone_id}
+                  </span>
+                )}
+              </span>
               <span style={{ color: t.text, fontFamily: "'Lato', sans-serif", fontWeight: 500, fontSize: 13 }}>{fmtKD(deliveryFee)}</span>
             </div>
           )}
@@ -14917,6 +14978,193 @@ function CancelOrderDetailButton({ order, t, darkMode }) {
   );
 }
 
+// ─── Delivery Zones helpers ───────────────────────────────────────────────────
+const DZ_COLORS = [
+  { bg: "rgba(196,113,26,0.10)",  border: "rgba(196,113,26,0.38)",  dot: "#C4711A", label: "#C4711A" },
+  { bg: "rgba(45,122,79,0.10)",   border: "rgba(45,122,79,0.38)",   dot: "#2D7A4F", label: "#2D7A4F" },
+  { bg: "rgba(99,102,241,0.10)",  border: "rgba(99,102,241,0.38)",  dot: "#6366F1", label: "#6366F1" },
+  { bg: "rgba(245,158,11,0.10)",  border: "rgba(245,158,11,0.38)",  dot: "#F59E0B", label: "#b87a00" },
+  { bg: "rgba(236,72,153,0.10)",  border: "rgba(236,72,153,0.38)",  dot: "#EC4899", label: "#EC4899" },
+  { bg: "rgba(20,184,166,0.10)",  border: "rgba(20,184,166,0.38)",  dot: "#14B8A6", label: "#0f8b7e" },
+];
+const dzColor = (i) => DZ_COLORS[i % DZ_COLORS.length];
+
+// Coverage bar shown above zone cards
+function DZCoverageBar({ zones, t }) {
+  if (!zones || zones.length === 0) return null;
+  const maxKm = Math.max(...zones.map(z => Number(z.max_km) || 0), 1);
+  return (
+    <div style={{ background: t.surface2, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
+      <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 10 }}>
+        Coverage Map
+      </p>
+      {/* Bar */}
+      <div style={{ display: "flex", height: 30, borderRadius: 7, overflow: "hidden" }}>
+        {zones.map((z, i) => {
+          const prevMax = i === 0 ? 0 : (Number(zones[i - 1].max_km) || 0);
+          const thisMax = Number(z.max_km) || maxKm;
+          const width = ((thisMax - prevMax) / maxKm) * 82;
+          const c = dzColor(i);
+          return (
+            <div key={i} title={`${z.name}: ${prevMax}–${z.max_km} km · ${Number(z.fee) === 0 ? "Free" : `KD ${Number(z.fee).toFixed(3)}`}`}
+              style={{ width: `${width}%`, background: c.bg, borderRight: i < zones.length - 1 ? `2px dashed ${c.border}` : "none",
+                display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden",
+                transition: "width .5s cubic-bezier(.4,0,.2,1)", minWidth: 0 }}>
+              <div style={{ position: "absolute", inset: 0, background: `repeating-linear-gradient(90deg,transparent 0,transparent 13px,${c.border} 13px,${c.border} 14px)`, opacity: .2 }} />
+              <span style={{ color: c.label, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, position: "relative", zIndex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", padding: "0 4px" }}>
+                {width > 10 ? z.name : ""}
+              </span>
+            </div>
+          );
+        })}
+        {/* No-delivery tail */}
+        <div style={{ width: "18%", flexShrink: 0, background: "repeating-linear-gradient(135deg,transparent,transparent 4px,rgba(184,50,50,.08) 4px,rgba(184,50,50,.08) 8px)",
+          display: "flex", alignItems: "center", justifyContent: "center", borderLeft: "2px solid rgba(184,50,50,.25)" }}>
+          <span style={{ color: "#B83232", fontSize: 10, fontWeight: 700, opacity: .8 }}>✕</span>
+        </div>
+      </div>
+      {/* Km markers */}
+      <div style={{ position: "relative", marginTop: 5, height: 14 }}>
+        <span style={{ position: "absolute", left: 0, color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 10 }}>0 km</span>
+        {zones.map((z, i) => {
+          const pct = ((Number(z.max_km) || maxKm) / maxKm) * 82;
+          return Number(z.max_km) ? (
+            <span key={i} style={{ position: "absolute", left: `${pct}%`, transform: "translateX(-50%)", color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 10 }}>
+              {z.max_km} km
+            </span>
+          ) : null;
+        })}
+        <span style={{ position: "absolute", right: 0, color: "#B83232", fontFamily: "'Lato', sans-serif", fontSize: 10, opacity: .7 }}>No delivery</span>
+      </div>
+    </div>
+  );
+}
+
+// Road connector between zone cards
+function DZConnector({ t }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, position: "relative" }}>
+      <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", width: 2, height: "100%",
+        background: `repeating-linear-gradient(to bottom, ${t.border2} 0,${t.border2} 5px, transparent 5px, transparent 10px)` }} />
+      <div style={{ position: "relative", zIndex: 1, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 20,
+        padding: "1px 9px", color: t.muted, fontSize: 10, fontFamily: "'Lato', sans-serif", fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase" }}>
+        then
+      </div>
+    </div>
+  );
+}
+
+// Single zone card
+function DZCard({ zone, index, total, t, prevMaxKm, onChange, onRemove }) {
+  const c = dzColor(index);
+  const isLast = index === total - 1;
+  const [localFee, setLocalFee] = useState(String(zone.fee ?? 0));
+  const [localMax, setLocalMax] = useState(zone.max_km != null ? String(zone.max_km) : "");
+  const [shake, setShake] = useState(false);
+
+  useEffect(() => { setLocalFee(String(zone.fee ?? 0)); }, [zone.fee]);
+  useEffect(() => { setLocalMax(zone.max_km != null ? String(zone.max_km) : ""); }, [zone.max_km]);
+
+  const doShake = () => { setShake(true); setTimeout(() => setShake(false), 420); };
+
+  const handleMaxBlur = () => {
+    const n = parseFloat(localMax);
+    if (!localMax || isNaN(n) || n <= 0) { setLocalMax(zone.max_km != null ? String(zone.max_km) : ""); return; }
+    if (prevMaxKm !== null && n <= prevMaxKm) { setLocalMax(zone.max_km != null ? String(zone.max_km) : ""); doShake(); return; }
+    onChange({ max_km: n });
+  };
+  const handleFeeBlur = () => {
+    const n = parseFloat(localFee);
+    if (localFee === "" || isNaN(n) || n < 0) { setLocalFee(String(zone.fee ?? 0)); return; }
+    onChange({ fee: n });
+  };
+
+  const iStyle = (extra = {}) => ({
+    background: "transparent", border: `1.5px solid ${c.border}`, color: c.label,
+    fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 14,
+    borderRadius: 8, padding: "8px 10px", outline: "none", width: "100%",
+    transition: "border-color .2s", ...extra,
+  });
+
+  return (
+    <>
+      <style>{`
+        @keyframes dzShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+        @keyframes dzIn{from{opacity:0;transform:translateY(-8px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+      `}</style>
+      <div style={{ background: c.bg, border: `1.5px solid ${c.border}`, borderRadius: 14, padding: "15px 16px",
+        animation: shake ? "dzShake .42s ease" : "dzIn .24s ease" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 9, height: 9, borderRadius: "50%", background: c.dot, flexShrink: 0,
+              boxShadow: `0 0 0 3px ${c.bg}, 0 0 0 5px ${c.border}` }} />
+            <span style={{ color: c.label, fontFamily: "'Cormorant Garamond', serif", fontSize: 16, fontWeight: 700 }}>{zone.name}</span>
+            <span style={{ color: c.label, fontFamily: "'Lato', sans-serif", fontSize: 11, opacity: .65 }}>
+              {prevMaxKm !== null ? prevMaxKm : 0}–{zone.max_km ? `${zone.max_km} km` : "∞"}
+            </span>
+          </div>
+          {total > 1 && (
+            <button onClick={onRemove}
+              style={{ background: "rgba(184,50,50,.09)", border: "1px solid rgba(184,50,50,.22)", color: "#B83232",
+                borderRadius: 6, padding: "2px 8px", fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700,
+                cursor: "pointer", transition: "background .15s" }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(184,50,50,.18)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(184,50,50,.09)"}>
+              Remove
+            </button>
+          )}
+        </div>
+        {/* Fields */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11 }}>
+          <div>
+            <p style={{ color: c.label, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 5, opacity: .75 }}>
+              Up to (km)
+            </p>
+            <div style={{ position: "relative" }}>
+              <input type="number" min={prevMaxKm !== null ? prevMaxKm + 0.1 : 0.1} step="0.5"
+                value={localMax} onChange={e => setLocalMax(e.target.value)} onBlur={handleMaxBlur}
+                placeholder={`e.g. ${(index + 1) * 2}`} style={iStyle()}
+                onFocus={e => e.target.style.borderColor = c.dot}
+              />
+              <span style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", color: c.label, fontSize: 11, opacity: .55, pointerEvents: "none", fontFamily: "'Lato', sans-serif" }}>km</span>
+            </div>
+            {prevMaxKm !== null && (
+              <p style={{ color: c.label, fontFamily: "'Lato', sans-serif", fontSize: 10, marginTop: 3, opacity: .6 }}>Must be &gt; {prevMaxKm} km</p>
+            )}
+          </div>
+          <div>
+            <p style={{ color: c.label, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 5, opacity: .75 }}>
+              Delivery Fee (KD)
+            </p>
+            <div style={{ position: "relative" }}>
+              <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: c.label, fontSize: 11, opacity: .55, pointerEvents: "none", fontFamily: "'Lato', sans-serif" }}>KD</span>
+              <input type="number" min="0" step="0.025"
+                value={localFee} onChange={e => setLocalFee(e.target.value)} onBlur={handleFeeBlur}
+                placeholder="0.000" style={iStyle({ paddingLeft: 28 })}
+                onFocus={e => e.target.style.borderColor = c.dot}
+              />
+            </div>
+            {parseFloat(localFee) === 0 && localFee !== "" && (
+              <p style={{ color: "#2D7A4F", fontFamily: "'Lato', sans-serif", fontSize: 10, marginTop: 3, fontWeight: 700 }}>🎉 Free in this zone</p>
+            )}
+          </div>
+        </div>
+      </div>
+      {/* "No delivery beyond" badge after last zone */}
+      {isLast && zone.max_km && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px 14px", marginTop: 4,
+          background: "rgba(184,50,50,.06)", border: "1px dashed rgba(184,50,50,.28)", borderRadius: 10 }}>
+          <span style={{ fontSize: 13 }}>🚫</span>
+          <span style={{ color: "#B83232", fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 700 }}>
+            No delivery beyond {zone.max_km} km
+          </span>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── Settings Page ────────────────────────────────────────────────────────────
 function SettingsPage({ t, user }) {
   const restId = user?.role === "owner" ? user?.main_rest : user?.rest_id;
@@ -14955,6 +15203,15 @@ function SettingsPage({ t, user }) {
   const [saveOk, setSaveOk] = useState(false);
   const [activeTab, setActiveTab] = useState("info"); // info | location | images
   const [uploadingField, setUploadingField] = useState(null); // which image slot is uploading
+
+  // ── Delivery zones state ────────────────────────────────────────────────────────────────────────────────────────────
+  const [dzUseFixed, setDzUseFixed] = useState(false);
+  const [dzFixedFee, setDzFixedFee] = useState("0");
+  const [dzZones, setDzZones] = useState([]); // [{id,zone_order,name,max_km,fee,_new}]
+  const [dzLoading, setDzLoading] = useState(true);
+  const [dzSaving, setDzSaving] = useState(false);
+  const [dzErr, setDzErr] = useState("");
+  const [dzOk, setDzOk] = useState(false);
 
   // ── fetch restaurant on mount ───────────────────────────────────────────────
   useEffect(() => {
@@ -15004,6 +15261,95 @@ function SettingsPage({ t, user }) {
       })
       .catch(() => setLoading(false));
   }, [restId]);
+
+  // ── load delivery zones ─────────────────────────────────────────────────────────────────────────────────────
+  const loadDeliveryZones = useCallback(async () => {
+    if (!restId) return;
+    setDzLoading(true); setDzErr("");
+    try {
+      const [{ data: rest, error: rErr }, { data: zData, error: zErr }] = await Promise.all([
+        supabase.from("Restaurants").select("use_fixed_fee, fixed_delivery_fee").eq("id", restId).single(),
+        supabase.from("Delivery_Zones").select("id, zone_order, name, max_km, fee").eq("rest_id", restId).order("zone_order", { ascending: true }),
+      ]);
+      if (rErr) throw rErr;
+      if (zErr) throw zErr;
+      setDzUseFixed(rest?.use_fixed_fee ?? false);
+      setDzFixedFee(rest?.fixed_delivery_fee != null ? String(rest.fixed_delivery_fee) : "0");
+      setDzZones(zData || []);
+    } catch (e) {
+      setDzErr(e?.message || "Failed to load delivery zones.");
+    } finally {
+      setDzLoading(false);
+    }
+  }, [restId]);
+
+  useEffect(() => {
+    if (activeTab === "delivery") loadDeliveryZones();
+  }, [activeTab, loadDeliveryZones]);
+
+  // ── delivery zones add / remove / update helpers ─────────────────────────────────────────────────────
+  const dzAddZone = () => {
+    const order = dzZones.length + 1;
+    const prevMax = dzZones.length > 0 ? (Number(dzZones[dzZones.length - 1].max_km) || 0) : 0;
+    setDzZones(prev => [...prev, { id: null, zone_order: order, name: `Zone ${order}`, max_km: prevMax > 0 ? prevMax + 2 : 2, fee: 0, _new: true }]);
+  };
+  const dzRemoveZone = (index) => {
+    setDzZones(prev => prev.filter((_, i) => i !== index).map((z, i) => ({ ...z, zone_order: i + 1, name: `Zone ${i + 1}` })));
+  };
+  const dzUpdateZone = (index, patch) => {
+    setDzZones(prev => prev.map((z, i) => i === index ? { ...z, ...patch } : z));
+  };
+
+  // ── save delivery zones ───────────────────────────────────────────────────────────────────────────────────────
+  const handleSaveDz = async () => {
+    // validate
+    if (!dzUseFixed) {
+      for (let i = 0; i < dzZones.length; i++) {
+        const z = dzZones[i];
+        const km = Number(z.max_km);
+        if (!z.max_km || isNaN(km) || km <= 0) {
+          setDzErr(`Zone ${i + 1}: "Up to" distance must be a positive number.`); return;
+        }
+        if (i > 0 && km <= Number(dzZones[i - 1].max_km)) {
+          setDzErr(`Zone ${i + 1}: distance must be greater than Zone ${i}'s (${dzZones[i - 1].max_km} km).`); return;
+        }
+        if (isNaN(Number(z.fee)) || Number(z.fee) < 0) {
+          setDzErr(`Zone ${i + 1}: fee must be 0 or a positive number.`); return;
+        }
+      }
+    } else {
+      if (isNaN(Number(dzFixedFee)) || Number(dzFixedFee) < 0) {
+        setDzErr("Fixed delivery fee must be 0 or a positive number."); return;
+      }
+    }
+    setDzSaving(true); setDzErr(""); setDzOk(false);
+    try {
+      const { error: rErr } = await supabase.from("Restaurants")
+        .update({ use_fixed_fee: dzUseFixed, fixed_delivery_fee: Number(dzFixedFee) || 0 })
+        .eq("id", restId);
+      if (rErr) throw rErr;
+
+      // Always delete then reinsert (clean-slate strategy prevents conflicts)
+      const { error: delErr } = await supabase.from("Delivery_Zones").delete().eq("rest_id", restId);
+      if (delErr) throw delErr;
+
+      if (!dzUseFixed && dzZones.length > 0) {
+        const rows = dzZones.map((z, i) => ({
+          rest_id: restId, zone_order: i + 1, name: `Zone ${i + 1}`,
+          max_km: Number(z.max_km), fee: Number(z.fee),
+        }));
+        const { error: insErr } = await supabase.from("Delivery_Zones").insert(rows);
+        if (insErr) throw insErr;
+      }
+      setDzOk(true);
+      setTimeout(() => setDzOk(false), 3000);
+      await loadDeliveryZones();
+    } catch (e) {
+      setDzErr(e?.message || "Failed to save delivery zones.");
+    } finally {
+      setDzSaving(false);
+    }
+  };
 
   // ── save info ───────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -15260,6 +15606,7 @@ function SettingsPage({ t, user }) {
     { id: "info",     label: "Info",     icon: "📋" },
     { id: "location", label: "Location", icon: "📍" },
     { id: "images",   label: "Images",   icon: "🖼️" },
+    { id: "delivery", label: "Delivery", icon: "🚴" },
   ];
 
   const inp = (value, onChange, placeholder, type = "text", extra = {}) => (
@@ -15749,9 +16096,133 @@ function SettingsPage({ t, user }) {
             </div>
           </div>
         )}
+
+        {/* ── DELIVERY ZONES TAB ── */}
+        {activeTab === "delivery" && (
+          <div style={{ animation: "fadeInUp .22s ease" }}>
+            <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 4 }}>
+              Delivery Zones
+            </p>
+            <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 12, marginBottom: 20, lineHeight: 1.6 }}>
+              Set distance-based zones with individual fees, or charge a single flat rate.
+            </p>
+
+            {/* Mode switcher */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 22, background: t.surface2, borderRadius: 10, padding: 4 }}>
+              {[
+                { id: false, label: "📍 Zone-based fees", sub: "Different fee per distance" },
+                { id: true,  label: "💰 Fixed fee",       sub: "Same fee for all orders" },
+              ].map(opt => (
+                <button key={String(opt.id)} onClick={() => { setDzUseFixed(opt.id); setDzErr(""); }}
+                  style={{ flex: 1, padding: "9px 8px", borderRadius: 8, border: "none", cursor: "pointer", textAlign: "center",
+                    background: dzUseFixed === opt.id ? t.surface : "transparent",
+                    boxShadow: dzUseFixed === opt.id ? "0 1px 6px rgba(0,0,0,.10)" : "none", transition: "all .2s" }}>
+                  <div style={{ color: dzUseFixed === opt.id ? t.accent : t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 13, fontWeight: 700 }}>{opt.label}</div>
+                  <div style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 10, marginTop: 2 }}>{opt.sub}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* Loading state */}
+            {dzLoading ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>Loading delivery zones…</div>
+            ) : dzUseFixed ? (
+              /* ── Fixed fee mode */
+              <div style={{ animation: "fadeInUp .2s ease" }}>
+                <div style={{ background: "rgba(196,113,26,0.07)", border: "1.5px solid rgba(196,113,26,0.25)", borderRadius: 14, padding: "20px 18px" }}>
+                  <p style={{ color: t.subtle, fontFamily: "'Lato', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 10 }}>
+                    Fixed Delivery Fee
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ position: "relative", maxWidth: 200 }}>
+                      <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: t.accent, fontFamily: "'Lato', sans-serif", fontSize: 13, fontWeight: 700, pointerEvents: "none" }}>KD</span>
+                      <input type="number" min="0" step="0.025" value={dzFixedFee}
+                        onChange={e => setDzFixedFee(e.target.value)}
+                        placeholder="0.000"
+                        style={{ background: t.surface, border: "1.5px solid rgba(196,113,26,0.35)", color: t.text,
+                          fontFamily: "'Lato', sans-serif", fontWeight: 700, fontSize: 16, borderRadius: 10,
+                          padding: "11px 14px 11px 36px", width: "100%", outline: "none", transition: "border-color .2s" }}
+                        onFocus={e => e.target.style.borderColor = "#C4711A"}
+                        onBlur={e => e.target.style.borderColor = "rgba(196,113,26,0.35)"} />
+                    </div>
+                    {parseFloat(dzFixedFee) === 0 && dzFixedFee !== "" && (
+                      <span style={{ color: "#2D7A4F", fontFamily: "'Lato', sans-serif", fontSize: 13, fontWeight: 700 }}>🎉 Free delivery!</span>
+                    )}
+                  </div>
+                  <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, marginTop: 10 }}>
+                    Applies to all delivery orders regardless of distance. Set to 0 for free delivery.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              /* ── Zone-based mode */
+              <div style={{ animation: "fadeInUp .2s ease" }}>
+                <DZCoverageBar zones={dzZones} t={t} />
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                  {dzZones.length === 0 && (
+                    <div style={{ textAlign: "center", padding: "28px 16px", background: t.surface2, border: `1px dashed ${t.border2}`, borderRadius: 12, marginBottom: 14 }}>
+                      <span style={{ fontSize: 34, display: "block", marginBottom: 8 }}>🗺️</span>
+                      <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 13 }}>No zones yet. Add your first zone below.</p>
+                    </div>
+                  )}
+                  {dzZones.map((zone, i) => (
+                    <div key={zone.id ?? `new-${i}`} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {i > 0 && <DZConnector t={t} />}
+                      <DZCard
+                        zone={zone}
+                        index={i}
+                        total={dzZones.length}
+                        t={t}
+                        prevMaxKm={i === 0 ? null : (Number(dzZones[i - 1].max_km) ?? null)}
+                        onChange={patch => dzUpdateZone(i, patch)}
+                        onRemove={() => dzRemoveZone(i)}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add zone button */}
+                <button onClick={dzAddZone}
+                  style={{ width: "100%", marginTop: 12, padding: "11px 0", background: t.accentBg,
+                    border: `1.5px dashed ${t.accentBorder}`, color: t.accent, fontFamily: "'Lato', sans-serif",
+                    fontWeight: 700, fontSize: 13, borderRadius: 12, cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 7, transition: "all .2s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(196,113,26,.15)"; e.currentTarget.style.transform = "scale(1.01)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = t.accentBg; e.currentTarget.style.transform = "scale(1)"; }}>
+                  <span style={{ fontSize: 15 }}>+</span> Add Zone {dzZones.length + 1}
+                </button>
+
+                {dzZones.length > 0 && (
+                  <p style={{ color: t.muted, fontFamily: "'Lato', sans-serif", fontSize: 11, marginTop: 10, lineHeight: 1.6, textAlign: "center" }}>
+                    💡 Orders beyond the last zone’s distance will be rejected automatically.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Delivery zones save/error bar */}
+            <div style={{ position: "sticky", bottom: 0, left: 0, right: 0, background: t.surface, borderTop: `1px solid ${t.border}`,
+              padding: "14px 20px", marginTop: 20, display: "flex", alignItems: "center", justifyContent: "space-between",
+              gap: 12, flexWrap: "wrap", borderRadius: 12, boxShadow: "0 -4px 24px rgba(0,0,0,.08)", zIndex: 10 }}>
+              <div>
+                {dzErr && <p style={{ color: t.red, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600, maxWidth: 340 }}>⚠️ {dzErr}</p>}
+                {dzOk  && <p style={{ color: t.green, fontFamily: "'Lato', sans-serif", fontSize: 12, fontWeight: 600 }}>✅ Delivery zones saved!</p>}
+              </div>
+              <button onClick={handleSaveDz} disabled={dzSaving || dzLoading}
+                style={{ background: dzSaving || dzLoading ? t.border2 : t.accent,
+                  color: dzSaving || dzLoading ? t.muted : "#fff", fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700, fontSize: 14, padding: "11px 28px", borderRadius: 10, border: "none",
+                  cursor: dzSaving || dzLoading ? "not-allowed" : "pointer", transition: "all .2s", minWidth: 120 }}>
+                {dzSaving ? "Saving…" : "Save Zones"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── Save bar ── */}
+      {/* ── Save bar (Info / Location / Images tabs only) ── */}
+      {activeTab !== "delivery" && (
       <div style={{
         position: "sticky", bottom: 0, left: 0, right: 0,
         background: t.surface, borderTop: `1px solid ${t.border}`,
@@ -15788,6 +16259,7 @@ function SettingsPage({ t, user }) {
           {saving ? "Saving…" : uploadingField ? "Uploading…" : "Save Changes"}
         </button>
       </div>
+      )}
     </div>
   );
 }

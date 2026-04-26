@@ -6,6 +6,58 @@ import "./index.css";
 const fmt = (n) => `KD ${Number(n || 0).toFixed(3)}`;
 
 /**
+ * Haversine formula — returns straight-line distance in kilometres
+ * between two lat/lng pairs.
+ */
+const haversineKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+/**
+ * Given the customer's coordinates, the restaurant's coordinates, and an array
+ * of Delivery_Zones rows (sorted ascending by zone_order), returns:
+ *   { fee, zone, outOfRange }
+ *
+ * Rules:
+ *  - Zones are tested in ascending zone_order.
+ *  - A zone matches when distance <= zone.max_km  (or max_km IS NULL → catch-all).
+ *  - If no zone matches → outOfRange = true.
+ *  - If zones array is empty → { fee: 0, zone: null, outOfRange: false } (free delivery).
+ */
+const resolveDeliveryZone = (custLat, custLng, restLat, restLng, zones) => {
+  if (!custLat || !custLng || !restLat || !restLng) {
+    // Missing coordinates — cannot determine zone; treat as out-of-range
+    return { fee: 0, zone: null, outOfRange: true, missingCoords: true };
+  }
+  if (!zones || zones.length === 0) {
+    // No zones configured — free delivery
+    return { fee: 0, zone: null, outOfRange: false };
+  }
+  const distKm = haversineKm(
+    Number(custLat),
+    Number(custLng),
+    Number(restLat),
+    Number(restLng),
+  );
+  for (const z of zones) {
+    if (z.max_km === null || z.max_km === undefined || Number(distKm) <= Number(z.max_km)) {
+      return { fee: Number(z.fee), zone: z, outOfRange: false, distKm };
+    }
+  }
+  // Beyond all defined zones
+  return { fee: 0, zone: null, outOfRange: true, distKm };
+};
+
+/**
  * Reads the URL for either:
  *   ?r=<slug>          ← preferred (new style)
  *   ?rest_id=<id>      ← legacy numeric fallback
@@ -2060,11 +2112,18 @@ function CartSheet({
   onApplyDiscount,
   customer,
   restId,
+  deliveryFeeInfo,
+  orderType,
 }) {
+  const isPickup = orderType === "pickup";
+  // Fee to use in cart preview: 0 for pickup, 0 if out-of-range (blocked at checkout)
+  const previewFee = isPickup ? 0 : (deliveryFeeInfo?.outOfRange ? 0 : (deliveryFeeInfo?.fee ?? 0));
   const { subT, delivery, total, discountAmt } = calcTotals(
     cart,
     addonCart,
     appliedDiscount,
+    previewFee,
+    isPickup,
   );
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
@@ -2463,10 +2522,51 @@ function CartSheet({
                 <span>Subtotal</span>
                 <span>{fmt(subT)}</span>
               </div>
-              <div className="sum-row">
-                <span>Delivery fee</span>
-                <span>{fmt(delivery)}</span>
-              </div>
+              {/* Delivery fee row */}
+              {!isPickup && (
+                <>
+                  {deliveryFeeInfo?.outOfRange ? (
+                    <div
+                      className="sum-row"
+                      style={{ color: "var(--red)", fontWeight: 600, fontSize: 12, flexWrap: "wrap", gap: 4 }}
+                    >
+                      <span>🚫 Delivery unavailable to your area</span>
+                      <span>—</span>
+                    </div>
+                  ) : deliveryFeeInfo?.isFixed ? (
+                    <div className="sum-row">
+                      <span>Delivery fee</span>
+                      <span>{fmt(deliveryFeeInfo.fee)}</span>
+                    </div>
+                  ) : deliveryFeeInfo?.zone ? (
+                    <div className="sum-row">
+                      <span>
+                        Delivery
+                        <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 5 }}>
+                          ({deliveryFeeInfo.zone.name})
+                        </span>
+                      </span>
+                      <span>{fmt(deliveryFeeInfo.fee)}</span>
+                    </div>
+                  ) : deliveryFeeInfo === null ? (
+                    <div className="sum-row" style={{ color: "var(--t3)", fontSize: 12 }}>
+                      <span>Delivery fee</span>
+                      <span>Select address</span>
+                    </div>
+                  ) : (
+                    <div className="sum-row">
+                      <span>Delivery fee</span>
+                      <span>{fmt(delivery)}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {isPickup && (
+                <div className="sum-row" style={{ color: "#0f766e", fontWeight: 600 }}>
+                  <span>🏃 Pickup</span>
+                  <span>Free</span>
+                </div>
+              )}
               {discountAmt > 0 && (
                 <div
                   className="sum-row"
@@ -2543,6 +2643,7 @@ function CheckoutSheet({
   acceptPickup,
   orderType,
   onOrderTypeChange,
+  deliveryFeeInfo,
 }) {
   const [selAddr, setSelAddr] = useState(defaultAddr?.id || null);
   const [pay, setPay] = useState("Cash");
@@ -2568,6 +2669,15 @@ function CheckoutSheet({
   const addr = addresses.find((a) => a.id === selAddr);
   const isPickup = orderType === "pickup";
   const bothOff = !acceptDelivery && !acceptPickup;
+
+  // Recompute the checkout total using the zone-resolved delivery fee
+  const zoneFee = isPickup ? 0 : (deliveryFeeInfo?.outOfRange ? 0 : (deliveryFeeInfo?.fee ?? 0));
+  // total prop already includes fee from CartSheet preview — recompute from subTotal for accuracy
+  const zoneTotal = subTotal != null
+    ? Math.max(0, subTotal - (discountAmt ?? 0) + zoneFee)
+    : total;
+  const outOfRange = !isPickup && !!deliveryFeeInfo?.outOfRange;
+  const missingCoords = !isPickup && !!deliveryFeeInfo?.missingCoords;
 
   return (
     <>
@@ -2851,18 +2961,70 @@ function CheckoutSheet({
               )}
               {/* Delivery fee row — delivery only */}
               {!isPickup && (
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 13,
-                    color: "var(--t2)",
-                    marginBottom: 6,
-                  }}
-                >
-                  <span>Delivery fee</span>
-                  <span>{fmt(0.5)}</span>
-                </div>
+                <>
+                  {outOfRange ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 13,
+                        color: "var(--red)",
+                        fontWeight: 600,
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span>🚫 Delivery fee</span>
+                      <span>Out of range</span>
+                    </div>
+                  ) : deliveryFeeInfo?.isFixed ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 13,
+                        color: "var(--t2)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span>Delivery fee</span>
+                      <span>{fmt(deliveryFeeInfo.fee)}</span>
+                    </div>
+                  ) : deliveryFeeInfo?.zone ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 13,
+                        color: "var(--t2)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span>
+                        Delivery fee
+                        <span style={{ fontSize: 11, marginLeft: 5, color: "var(--t3)" }}>
+                          ({deliveryFeeInfo.zone.name}
+                          {deliveryFeeInfo.distKm != null
+                            ? ` · ${deliveryFeeInfo.distKm.toFixed(1)} km`
+                            : ""})
+                        </span>
+                      </span>
+                      <span>{fmt(deliveryFeeInfo.fee)}</span>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 13,
+                        color: "var(--t2)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span>Delivery fee</span>
+                      <span>{fmt(0.5)}</span>
+                    </div>
+                  )}
+                </>
               )}
               {appliedDiscount && discountAmt > 0 && (
                 <div
@@ -2892,9 +3054,33 @@ function CheckoutSheet({
               >
                 <span style={{ fontWeight: 600 }}>Total to pay</span>
                 <span style={{ fontSize: 18, fontWeight: 800 }}>
-                  {fmt(total)}
+                  {fmt(zoneTotal)}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Out-of-range delivery warning */}
+          {outOfRange && !bothOff && (
+            <div
+              style={{
+                background: "#fdecea",
+                border: "1.5px solid #fca5a5",
+                borderRadius: var_r_sm,
+                padding: "14px 16px",
+                marginBottom: 16,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 28, marginBottom: 6 }}>🚫</div>
+              <p style={{ fontWeight: 800, fontSize: 14, color: "var(--red)", marginBottom: 4 }}>
+                Delivery not available to your area
+              </p>
+              <p style={{ fontSize: 12, color: "#b91c1c", lineHeight: 1.5 }}>
+                {missingCoords
+                  ? "Your saved address is missing location coordinates. Please re-pin it on the map."
+                  : "Your address is outside the restaurant's delivery zones. Please choose pickup or a different address."}
+              </p>
             </div>
           )}
 
@@ -2916,10 +3102,14 @@ function CheckoutSheet({
           {!bothOff && (
             <button
               className="btn-primary"
-              disabled={placing || (!isPickup && !selAddr)}
+              disabled={placing || (!isPickup && !selAddr) || outOfRange}
               onClick={async () => {
                 if (!isPickup && !addr) {
                   setTypeErr("Please select a delivery address.");
+                  return;
+                }
+                if (outOfRange) {
+                  setTypeErr("Delivery is not available to your selected address.");
                   return;
                 }
                 setTypeErr("");
@@ -2933,7 +3123,7 @@ function CheckoutSheet({
                 setPlacing(false);
               }}
             >
-              {placing ? <Spinner size={20} /> : `Place order · ${fmt(total)}`}
+              {placing ? <Spinner size={20} /> : `Place order · ${fmt(zoneTotal)}`}
             </button>
           )}
         </div>
@@ -4479,11 +4669,17 @@ function DesktopCart({
   onApplyDiscount,
   customer,
   restId,
+  deliveryFeeInfo,
+  orderType,
 }) {
+  const isPickup = orderType === "pickup";
+  const previewFee = isPickup ? 0 : (deliveryFeeInfo?.outOfRange ? 0 : (deliveryFeeInfo?.fee ?? 0));
   const { subT, delivery, total, discountAmt } = calcTotals(
     cart,
     addonCart,
     appliedDiscount,
+    previewFee,
+    isPickup,
   );
   const minOk = !restaurant?.min_order || subT >= restaurant.min_order;
   const totalItems =
@@ -4905,10 +5101,38 @@ function DesktopCart({
                 <span>Subtotal</span>
                 <span>{fmt(subT)}</span>
               </div>
-              <div className="sum-row" style={{ fontSize: 13 }}>
-                <span>Delivery</span>
-                <span>{fmt(delivery)}</span>
-              </div>
+              {/* Delivery fee / pickup row */}
+              {isPickup ? (
+                <div className="sum-row" style={{ fontSize: 13, color: "#0f766e", fontWeight: 600 }}>
+                  <span>🏃 Pickup</span>
+                  <span>Free</span>
+                </div>
+              ) : deliveryFeeInfo?.outOfRange ? (
+                <div className="sum-row" style={{ fontSize: 12, color: "var(--red)", fontWeight: 600 }}>
+                  <span>🚫 Delivery unavailable</span>
+                  <span>—</span>
+                </div>
+              ) : deliveryFeeInfo?.zone ? (
+                <div className="sum-row" style={{ fontSize: 13 }}>
+                  <span>
+                    Delivery
+                    <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 5 }}>
+                      ({deliveryFeeInfo.zone.name})
+                    </span>
+                  </span>
+                  <span>{fmt(deliveryFeeInfo.fee)}</span>
+                </div>
+              ) : deliveryFeeInfo?.isFixed ? (
+                <div className="sum-row" style={{ fontSize: 13 }}>
+                  <span>Delivery</span>
+                  <span>{fmt(deliveryFeeInfo.fee)}</span>
+                </div>
+              ) : (
+                <div className="sum-row" style={{ fontSize: 13, color: "var(--t3)" }}>
+                  <span>Delivery</span>
+                  <span>{deliveryFeeInfo === null ? "Select address" : fmt(delivery)}</span>
+                </div>
+              )}
               {discountAmt > 0 && (
                 <div
                   className="sum-row"
@@ -4979,6 +5203,10 @@ export default function Customer() {
   const [addonCart, setAddonCart] = useState([]); // [{addon, qty}]
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deliveryZones, setDeliveryZones] = useState([]); // Delivery_Zones rows for this restaurant
+  // Resolved zone for the currently-selected delivery address:
+  // { fee, zone, outOfRange, distKm?, missingCoords? } | null
+  const [deliveryFeeInfo, setDeliveryFeeInfo] = useState(null);
 
   /* customer + addresses + orders */
   const [customer, setCustomer] = useState(null);
@@ -5005,6 +5233,42 @@ export default function Customer() {
 
   /* order type — "delivery" | "pickup". Resolved at checkout open. */
   const [orderType, setOrderType] = useState("delivery");
+
+  /* Recompute delivery zone + fee whenever the default address, zones, restaurant
+     or orderType change. For pickup, always clear deliveryFeeInfo. */
+  useEffect(() => {
+    if (orderType === "pickup") {
+      setDeliveryFeeInfo(null);
+      return;
+    }
+    if (!restaurant) return;
+
+    // If restaurant uses a fixed fee, skip zone logic
+    if (restaurant.use_fixed_fee) {
+      setDeliveryFeeInfo({
+        fee: Number(restaurant.fixed_delivery_fee ?? 0),
+        zone: null,
+        outOfRange: false,
+        isFixed: true,
+      });
+      return;
+    }
+
+    const defaultAddr = addresses.find((a) => a.id === defaultAddrId);
+    if (!defaultAddr) {
+      setDeliveryFeeInfo(null);
+      return;
+    }
+
+    const info = resolveDeliveryZone(
+      defaultAddr.latitude,
+      defaultAddr.longitude,
+      restaurant.latitude,
+      restaurant.longitude,
+      deliveryZones,
+    );
+    setDeliveryFeeInfo(info);
+  }, [defaultAddrId, addresses, deliveryZones, restaurant, orderType]);
 
   /* discount */
   const [appliedDiscount, setAppliedDiscount] = useState(null); // the validated Discount row
@@ -5091,7 +5355,7 @@ export default function Customer() {
           setRestId(resolvedId);
         }
 
-        const [rR, cR, mR, atR] = await Promise.all([
+        const [rR, cR, mR, atR, dzR] = await Promise.all([
           supabase
             .from("Restaurants")
             .select("*")
@@ -5114,11 +5378,17 @@ export default function Customer() {
             .select("id, name, min_qty")
             .eq("rest_id", resolvedId)
             .order("id"),
+          supabase
+            .from("Delivery_Zones")
+            .select("id, name, max_km, fee, zone_order")
+            .eq("rest_id", resolvedId)
+            .order("zone_order", { ascending: true }),
         ]);
         if (rR.error || !rR.data) throw new Error("Restaurant not found");
         setRestaurant(rR.data);
         setCategories(cR.data || []);
         setMenuItems((mR.data || []).filter((m) => m.is_available));
+        setDeliveryZones(dzR.data || []);
 
         const types = atR.data || [];
         if (types.length > 0) {
@@ -5192,7 +5462,7 @@ export default function Customer() {
       const { data } = await supabase
         .from("Orders")
         .select(
-          "id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone",
+          "id, status, total_amount, payment_method, created_at, notes, delivery_rider_name, delivery_rider_phone, order_type, delivery_fee, zone_id",
         )
         .eq("cust_id", cid)
         .eq("rest_id", restId)
@@ -5374,15 +5644,18 @@ export default function Customer() {
   const addonCartCount = addonCart.reduce((s, a) => s + a.qty, 0);
   const cartCount = cart.reduce((s, c) => s + c.qty, 0) + addonCartCount;
 
-  /* total = menu items + add-ons + delivery (no VAT) */
-  const calcTotals = (cartItems, addonCartItems, appliedDiscount) => {
+  /* total = menu items + add-ons + delivery fee (no VAT).
+     deliveryFee: pass 0 for pickup or when out-of-range (blocked at checkout level).
+     isPickup: if true, delivery fee is always 0 regardless of deliveryFee param. */
+  const calcTotals = (cartItems, addonCartItems, appliedDiscount, deliveryFee = 0, isPickup = false) => {
     const menuSub = cartItems.reduce((s, c) => s + c.unitPrice * c.qty, 0);
     const addonSub = addonCartItems.reduce(
       (s, a) => s + +a.addon.price * a.qty,
       0,
     );
     const subT = menuSub + addonSub;
-    const delivery = subT > 0 ? 0.5 : 0;
+    // Use the zone-resolved fee; 0 for empty cart or pickup
+    const delivery = (subT > 0 && !isPickup) ? Number(deliveryFee ?? 0) : 0;
     let discountAmt = 0;
     if (appliedDiscount && subT > 0) {
       if (appliedDiscount.type === "percentage") {
@@ -5406,7 +5679,19 @@ export default function Customer() {
   /* place order — writes Orders + Order_Items + Order_Item_Variants + Order_Item_AddOns */
   const placeOrder = async ({ address, payMethod, notes, orderType: ot }) => {
     if (!customer || !restaurant) return;
-    const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount);
+    const isPickup = ot === "pickup";
+    // Resolve which fee to charge: pickup → 0; fixed fee → fixed; zone fee → zone.fee
+    let resolvedFee = 0;
+    let resolvedZoneId = null;
+    if (!isPickup) {
+      if (restaurant.use_fixed_fee) {
+        resolvedFee = Number(restaurant.fixed_delivery_fee ?? 0);
+      } else if (deliveryFeeInfo && !deliveryFeeInfo.outOfRange) {
+        resolvedFee = Number(deliveryFeeInfo.fee ?? 0);
+        resolvedZoneId = deliveryFeeInfo.zone?.id ?? null;
+      }
+    }
+    const { total, discountAmt } = calcTotals(cart, addonCart, appliedDiscount, resolvedFee, isPickup);
     try {
       // 1. Create the order header
       const { data: order, error: oe } = await supabase
@@ -5420,6 +5705,8 @@ export default function Customer() {
           payment_method: payMethod,
           notes: notes || "",
           order_type: ot || "delivery",
+          delivery_fee: resolvedFee,
+          zone_id: resolvedZoneId,
         })
         .select()
         .single();
@@ -6206,6 +6493,8 @@ export default function Customer() {
             onApplyDiscount={setAppliedDiscount}
             customer={customer}
             restId={restId}
+            deliveryFeeInfo={deliveryFeeInfo}
+            orderType={orderType}
             onCheckout={(t) => {
               if (bothOrdersOff) {
                 showToast("We're not accepting orders right now.");
@@ -6285,6 +6574,8 @@ export default function Customer() {
           onApplyDiscount={setAppliedDiscount}
           customer={customer}
           restId={restId}
+          deliveryFeeInfo={deliveryFeeInfo}
+          orderType={orderType}
           onCheckout={(t, n) => {
             if (bothOrdersOff) {
               showToast("We're not accepting orders right now.");
@@ -6308,8 +6599,8 @@ export default function Customer() {
           onClose={() => setShowCheckout(false)}
           onPlaceOrder={placeOrder}
           appliedDiscount={appliedDiscount}
-          discountAmt={calcTotals(cart, addonCart, appliedDiscount).discountAmt}
-          subTotal={calcTotals(cart, addonCart, appliedDiscount).subT}
+          discountAmt={calcTotals(cart, addonCart, appliedDiscount, deliveryFeeInfo?.fee ?? 0, orderType === "pickup").discountAmt}
+          subTotal={calcTotals(cart, addonCart, appliedDiscount, deliveryFeeInfo?.fee ?? 0, orderType === "pickup").subT}
           onAddAddress={() => {
             setShowCheckout(false);
             setShowProfile(true);
@@ -6318,6 +6609,7 @@ export default function Customer() {
           acceptPickup={restaurant?.accept_pickup ?? true}
           orderType={orderType}
           onOrderTypeChange={setOrderType}
+          deliveryFeeInfo={deliveryFeeInfo}
         />
       )}
       {showTrack && lastOrder && (
@@ -6533,7 +6825,9 @@ function OrderDetailSheet({ order, onClose }) {
     (s, it) => s + Number(it.subtotal ?? it.unit_price * it.quantity ?? 0),
     0,
   );
-  const deliveryFee = 0.5;
+  // Use the stored delivery_fee from the order row (0 for pickup, zone fee for delivery)
+  const isPickupOrder = liveOrder.order_type === "pickup";
+  const deliveryFee = isPickupOrder ? 0 : Number(liveOrder.delivery_fee ?? 0);
   const discountAmt = discount?.amount_saved ?? 0;
 
   return (
@@ -6792,21 +7086,44 @@ function OrderDetailSheet({ order, onClose }) {
               </div>
             )}
 
-            {/* Delivery fee */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginBottom: 8,
-              }}
-            >
-              <span style={{ fontSize: 13, color: "var(--t2)" }}>
-                Delivery fee
-              </span>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>
-                {fmt(deliveryFee)}
-              </span>
-            </div>
+            {/* Delivery fee — hidden for pickup */}
+            {!isPickupOrder && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 13, color: "var(--t2)" }}>
+                  Delivery fee
+                  {liveOrder.zone_name ? (
+                    <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 5 }}>
+                      ({liveOrder.zone_name})
+                    </span>
+                  ) : null}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>
+                  {fmt(deliveryFee)}
+                </span>
+              </div>
+            )}
+            {isPickupOrder && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 13, color: "#0f766e", fontWeight: 600 }}>
+                  🏃 Pickup
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#0f766e" }}>
+                  Free
+                </span>
+              </div>
+            )}
 
             {/* Discount row — only shown when a redemption exists */}
             {discount && discountAmt > 0 && (
