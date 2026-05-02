@@ -6,6 +6,8 @@ import LandingApp from "./app/App.tsx";
 import Dashboard from "./Dashboard.jsx";
 import Customer from "./Customer.jsx";
 import Onboard from "./Onboard.jsx";
+import Privacy from "./Privacy.jsx";
+
 
 import { supabase } from "./supabaseClient";
 import "./styles/index.css";
@@ -52,6 +54,7 @@ function AppRoutes() {
       />
       <Route path="/customer" element={<Customer />} />
       <Route path="/onboard" element={<Onboard />} />
+      <Route path="/privacy-policy" element={<Privacy />} />
     </Routes>
   );
 }
