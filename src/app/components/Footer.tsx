@@ -6,10 +6,10 @@ export function Footer() {
   return (
     <footer className="border-t border-stone-200 py-12 px-6 lg:px-8 bg-stone-50">
       <div className="max-w-7xl mx-auto">
-        {/* Changed from 4 columns to 3 columns for a cleaner layout */}
+        {/* Main Columns */}
         <div className="grid md:grid-cols-3 gap-12 mb-12">
           
-          {/* Brand */}
+          {/* Brand & Parent Company Details */}
           <div className="col-span-1">
             <div className="flex items-center gap-2 mb-4 group cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
               <div className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center transition-transform group-hover:rotate-12">
@@ -17,12 +17,15 @@ export function Footer() {
               </div>
               <span className="text-xl font-bold text-stone-900 tracking-tight">Ungrie</span>
             </div>
-            <p className="text-stone-500 text-sm">
+            <p className="text-stone-500 text-sm mb-3">
               Turn WhatsApp into your ordering system. No commissions, just direct orders.
+            </p>
+            <p className="text-stone-400 text-xs font-medium">
+              Ungrie is a product of Melkhal Company for Wholesale & Retail Trading WLL.
             </p>
           </div>
 
-          {/* Product */}
+          {/* Product Links */}
           <div>
             <h4 className="text-stone-900 font-semibold mb-4">Product</h4>
             <ul className="space-y-3">
@@ -42,7 +45,6 @@ export function Footer() {
                 </a>
               </li>
               <li>
-                {/* Added Login Link Here */}
                 <button
                   onClick={() => navigate('/login')}
                   className="text-stone-500 hover:text-orange-600 text-sm transition-colors font-medium">
@@ -52,7 +54,7 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Support & Legal (Merged since Company was removed) */}
+          {/* Support & Legal */}
           <div>
             <h4 className="text-stone-900 font-semibold mb-4">Support & Legal</h4>
             <ul className="space-y-3">
@@ -80,11 +82,16 @@ export function Footer() {
           </div>
         </div>
 
-        {/* Bottom */}
+        {/* Bottom Section */}
         <div className="pt-8 border-t border-stone-200 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-stone-500 text-sm">
-            © {new Date().getFullYear()} Ungrie. All rights reserved.
-          </p>
+          <div className="flex flex-col gap-1 text-center md:text-left">
+            <p className="text-stone-500 text-sm">
+              © {new Date().getFullYear()} Ungrie. All rights reserved.
+            </p>
+            <p className="text-stone-400 text-xs">
+              Melkhal Company for Wholesale & Retail Trading WLL
+            </p>
+          </div>
 
           {/* Social Icons */}
           <div className="flex items-center gap-4">

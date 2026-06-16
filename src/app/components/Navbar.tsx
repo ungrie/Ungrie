@@ -32,14 +32,22 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="flex items-center justify-between">
           
-          {/* Logo - Made explicitly visible on all screens */}
-          <div className="flex items-center gap-2 group cursor-pointer relative z-[101]" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center transition-transform group-hover:rotate-12">
+          {/* Logo Section with Parent Company Attribution */}
+          <div 
+            className="flex items-center gap-2 group cursor-pointer relative z-[101]" 
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
+            <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center transition-transform group-hover:rotate-12 flex-shrink-0">
               <MessageSquare className="text-white w-6 h-6" />
             </div>
-            <span className="text-2xl font-black text-stone-900 tracking-tighter">
-              UNGRIE
-            </span>
+            <div className="flex flex-col justify-center select-none">
+              <span className="text-2xl font-black text-stone-900 tracking-tighter leading-none">
+                UNGRIE
+              </span>
+              <span className="text-[9px] font-bold text-stone-500 tracking-tight mt-1 max-w-[200px] sm:max-w-none leading-tight">
+                Product of Melkhal Company for Wholesale & Retail Trading WLL
+              </span>
+            </div>
           </div>
 
           {/* Desktop Navigation - Forced flex layout strictly on medium screens and up */}
